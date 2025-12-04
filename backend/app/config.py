@@ -45,7 +45,8 @@ class Settings(BaseSettings):
     ollama_model: str = "llama3.2"
 
     # OpenAI settings (if using cloud)
-    openai_api_key: str = ""
+    openai_api_key: str = ""  # Deprecated: now stored in DB via secrets service
+    openai_base_url: str = ""  # Custom endpoint for OpenAI-compatible services
     openai_model: str = "gpt-4o-mini"
 
     # Embedding settings
@@ -67,8 +68,9 @@ def create_settings() -> Settings:
     # Override with saved settings
     if "ai_provider" in saved:
         base.ai_provider = saved["ai_provider"]
-    if "openai_api_key" in saved:
-        base.openai_api_key = saved["openai_api_key"]
+    if "openai_base_url" in saved:
+        base.openai_base_url = saved["openai_base_url"]
+    # Note: openai_api_key is now stored in DB via secrets service
 
     return base
 

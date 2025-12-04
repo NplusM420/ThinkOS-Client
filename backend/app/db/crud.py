@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta
 from sqlalchemy import select, func
 
-from ..models import Memory, Setting, Tag, MemoryTag, Conversation, Message
+from ..models import Memory, Setting, Tag, MemoryTag, Conversation, Message, MessageSource
 from .core import get_session_maker, run_sync, serialize_embedding
 
 
@@ -483,7 +483,7 @@ async def get_conversations(limit: int = 50, offset: int = 0) -> list[dict]:
 
 
 async def get_conversation(conversation_id: int) -> dict | None:
-    """Get a conversation with all its messages."""
+    """Get a conversation with all its messages and their sources."""
     def _get():
         with get_session_maker()() as session:
             conversation = session.get(Conversation, conversation_id)
@@ -496,20 +496,34 @@ async def get_conversation(conversation_id: int) -> dict | None:
                 .order_by(Message.created_at.asc())
             ).scalars().all()
 
+            message_list = []
+            for m in messages:
+                # Get sources for this message
+                sources_result = session.execute(
+                    select(MessageSource, Memory)
+                    .join(Memory, MessageSource.memory_id == Memory.id)
+                    .where(MessageSource.message_id == m.id)
+                ).all()
+
+                sources = [
+                    {"id": mem.id, "title": mem.title, "url": mem.url}
+                    for msg_src, mem in sources_result
+                ]
+
+                message_list.append({
+                    "id": m.id,
+                    "role": m.role,
+                    "content": m.content,
+                    "created_at": m.created_at.isoformat(),
+                    "sources": sources,
+                })
+
             return {
                 "id": conversation.id,
                 "title": conversation.title,
                 "created_at": conversation.created_at.isoformat(),
                 "updated_at": conversation.updated_at.isoformat(),
-                "messages": [
-                    {
-                        "id": m.id,
-                        "role": m.role,
-                        "content": m.content,
-                        "created_at": m.created_at.isoformat(),
-                    }
-                    for m in messages
-                ],
+                "messages": message_list,
             }
 
     return await run_sync(_get)
@@ -543,8 +557,13 @@ async def update_conversation_title(conversation_id: int, title: str) -> bool:
     return await run_sync(_update)
 
 
-async def add_message(conversation_id: int, role: str, content: str) -> dict | None:
-    """Add a message to a conversation."""
+async def add_message(
+    conversation_id: int,
+    role: str,
+    content: str,
+    sources: list[dict] | None = None,
+) -> dict | None:
+    """Add a message to a conversation with optional sources."""
     def _add():
         with get_session_maker()() as session:
             conversation = session.get(Conversation, conversation_id)
@@ -557,6 +576,17 @@ async def add_message(conversation_id: int, role: str, content: str) -> dict | N
                 content=content,
             )
             session.add(message)
+            session.flush()  # Get message.id before adding sources
+
+            # Store sources if provided
+            if sources:
+                for source in sources:
+                    msg_source = MessageSource(
+                        message_id=message.id,
+                        memory_id=source["id"],
+                        relevance_score=source.get("distance"),
+                    )
+                    session.add(msg_source)
 
             # Update conversation's updated_at
             conversation.updated_at = datetime.utcnow()
@@ -570,6 +600,7 @@ async def add_message(conversation_id: int, role: str, content: str) -> dict | N
                 "role": message.role,
                 "content": message.content,
                 "created_at": message.created_at.isoformat(),
+                "sources": sources or [],
             }
 
     return await run_sync(_add)

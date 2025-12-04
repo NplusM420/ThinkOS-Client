@@ -100,4 +100,51 @@
   .animate-shake {
     animation: shake 0.4s ease-in-out;
   }
+
+  /* Chat markdown prose styling */
+  .chat-prose {
+    line-height: 1.7;
+    letter-spacing: -0.01em;
+  }
+  .chat-prose p {
+    margin: 0.5em 0;
+  }
+  .chat-prose p:first-child {
+    margin-top: 0;
+  }
+  .chat-prose p:last-child {
+    margin-bottom: 0;
+  }
+  .chat-prose ul, .chat-prose ol {
+    margin: 0.5em 0;
+    padding-left: 1.5em;
+  }
+  .chat-prose li {
+    margin: 0.25em 0;
+  }
+  .chat-prose h1, .chat-prose h2, .chat-prose h3, .chat-prose h4 {
+    font-weight: 600;
+    margin: 0.75em 0 0.5em;
+  }
+  .chat-prose h1 { font-size: 1.25em; }
+  .chat-prose h2 { font-size: 1.125em; }
+  .chat-prose h3 { font-size: 1em; }
+  .chat-prose code {
+    @apply bg-black/10 dark:bg-white/10 px-1.5 py-0.5 rounded text-[0.9em];
+  }
+  .chat-prose pre {
+    @apply bg-black/10 dark:bg-white/10 p-3 rounded-lg overflow-x-auto my-2;
+  }
+  .chat-prose pre code {
+    @apply bg-transparent p-0;
+  }
+  .chat-prose strong {
+    font-weight: 600;
+  }
+  .chat-prose a {
+    @apply text-primary underline;
+  }
+  .chat-prose blockquote {
+    @apply border-l-2 border-primary/50 pl-3 italic my-2;
+  }
 }

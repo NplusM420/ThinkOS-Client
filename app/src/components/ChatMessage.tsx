@@ -1,3 +1,4 @@
+import ReactMarkdown from "react-markdown";
 import { cn } from "@/lib/utils";
 import { AlertCircle } from "lucide-react";
 import type { ChatMessage as ChatMessageType } from "@/types/chat";
@@ -37,7 +38,16 @@ export function ChatMessage({ message }: ChatMessageProps) {
             : "bg-muted text-foreground"
         )}
       >
-        <p className="text-sm whitespace-pre-wrap">{message.content}</p>
+        {isUser ? (
+          <p className="text-sm whitespace-pre-wrap">{message.content}</p>
+        ) : (
+          <div className="chat-prose text-sm">
+            <ReactMarkdown>{message.content}</ReactMarkdown>
+            {message.isStreaming && (
+              <span className="inline-block w-2 h-4 ml-0.5 bg-current animate-pulse" />
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

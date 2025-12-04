@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { MemoryCard } from "@/components/MemoryCard";
 import { AddMemoryDialog } from "@/components/AddMemoryDialog";
+import { MemoryDetailPanel } from "@/components/MemoryDetailPanel";
 import { Plus, Search, Loader2, ChevronDown } from "lucide-react";
 import { API_BASE_URL } from "../constants";
 import { useMemoryEvents } from "../hooks/useMemoryEvents";
@@ -48,6 +49,11 @@ export default function MemoriesPage() {
   const [dateFilter, setDateFilter] = useState<DateFilter>("all");
   const [searchQuery, setSearchQuery] = useState("");
 
+  // Semantic search state
+  const [isSearching, setIsSearching] = useState(false);
+  const [searchResults, setSearchResults] = useState<Memory[] | null>(null);
+  const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   // Add dialog state
   const [showAddForm, setShowAddForm] = useState(
     searchParams.get("add") === "true"
@@ -55,6 +61,10 @@ export default function MemoriesPage() {
 
   // Tags state (for autocomplete in dialog)
   const [allTags, setAllTags] = useState<Tag[]>([]);
+
+  // Detail panel state
+  const [selectedMemoryId, setSelectedMemoryId] = useState<number | null>(null);
+  const [isPanelOpen, setIsPanelOpen] = useState(false);
 
   // Refs for infinite scroll
   const observerRef = useRef<IntersectionObserver | null>(null);
@@ -196,6 +206,18 @@ export default function MemoriesPage() {
     }
   }, [searchParams, setSearchParams]);
 
+  // Handle search params for opening a specific memory
+  useEffect(() => {
+    const openId = searchParams.get("open");
+    if (openId) {
+      const memoryId = parseInt(openId, 10);
+      if (!isNaN(memoryId)) {
+        handleExpand(memoryId);
+        setSearchParams({});
+      }
+    }
+  }, [searchParams, setSearchParams]);
+
   // Setup intersection observer for infinite scroll
   useEffect(() => {
     if (observerRef.current) {
@@ -260,14 +282,73 @@ export default function MemoriesPage() {
     fetchTags();
   };
 
-  // Filter memories by search query (client-side for now)
-  const filteredMemories = memories.filter(
-    (m) =>
-      !searchQuery ||
-      m.title?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      m.url?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      m.summary?.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  // Open detail panel
+  const handleExpand = (id: number) => {
+    setSelectedMemoryId(id);
+    setIsPanelOpen(true);
+  };
+
+  // Close detail panel
+  const closePanel = () => {
+    setIsPanelOpen(false);
+    // Delay clearing ID to allow close animation
+    setTimeout(() => setSelectedMemoryId(null), 300);
+  };
+
+  // Update memory in list when edited in panel
+  const handleMemoryUpdated = (updatedMemory: Memory) => {
+    setMemories((prev) =>
+      prev.map((m) => (m.id === updatedMemory.id ? { ...m, ...updatedMemory } : m))
+    );
+  };
+
+  // Perform semantic search
+  const performSemanticSearch = useCallback(async (query: string) => {
+    if (!query.trim()) {
+      setSearchResults(null);
+      return;
+    }
+
+    setIsSearching(true);
+    try {
+      const res = await fetch(
+        `${API_BASE_URL}/api/memories/search?q=${encodeURIComponent(query)}&limit=50`
+      );
+      if (res.ok) {
+        const data = await res.json();
+        setSearchResults(data.memories || []);
+      }
+    } catch (err) {
+      console.error("Semantic search failed:", err);
+    } finally {
+      setIsSearching(false);
+    }
+  }, []);
+
+  // Debounced semantic search when query changes
+  useEffect(() => {
+    if (searchDebounceRef.current) {
+      clearTimeout(searchDebounceRef.current);
+    }
+
+    if (!searchQuery.trim()) {
+      setSearchResults(null);
+      return;
+    }
+
+    searchDebounceRef.current = setTimeout(() => {
+      performSemanticSearch(searchQuery);
+    }, 300);
+
+    return () => {
+      if (searchDebounceRef.current) {
+        clearTimeout(searchDebounceRef.current);
+      }
+    };
+  }, [searchQuery, performSemanticSearch]);
+
+  // Determine which memories to display
+  const displayMemories = searchResults !== null ? searchResults : memories;
 
   const formatDate = (dateStr: string) => {
     const date = new Date(dateStr);
@@ -301,6 +382,17 @@ export default function MemoriesPage() {
         onOpenChange={setShowAddForm}
         onSuccess={handleAddSuccess}
         allTags={allTags}
+      />
+
+      {/* Memory Detail Panel */}
+      <MemoryDetailPanel
+        memoryId={selectedMemoryId}
+        isOpen={isPanelOpen}
+        onClose={closePanel}
+        onDelete={handleDelete}
+        onMemoryUpdated={handleMemoryUpdated}
+        allTags={allTags}
+        formatDate={formatDate}
       />
 
       {/* Filters */}
@@ -359,29 +451,35 @@ export default function MemoriesPage() {
         <div className="relative flex-1 min-w-[200px]">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
-            placeholder="Search memories..."
+            placeholder="Search memories (AI-powered)..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="pl-9"
+            className="pl-9 pr-9"
           />
+          {isSearching && (
+            <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 animate-spin text-muted-foreground" />
+          )}
         </div>
       </div>
 
       {/* Memory Grid - Masonry layout */}
-      {filteredMemories.length === 0 && !loading ? (
+      {displayMemories.length === 0 && !loading && !isSearching ? (
         <p className="text-muted-foreground text-center py-8">
           {memories.length === 0
             ? "No memories yet. Save some content via the browser extension or add a note!"
-            : "No memories match your search."}
+            : searchQuery
+            ? "No memories found for your search."
+            : "No memories match your filters."}
         </p>
       ) : (
         <div className="columns-1 sm:columns-2 gap-4">
-          {filteredMemories.map((memory) => (
+          {displayMemories.map((memory) => (
             <div key={memory.id} className="break-inside-avoid mb-4">
               <MemoryCard
                 memory={memory}
                 onDelete={handleDelete}
                 onRemoveTag={handleRemoveTag}
+                onExpand={handleExpand}
                 formatDate={formatDate}
               />
             </div>

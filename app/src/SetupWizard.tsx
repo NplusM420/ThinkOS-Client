@@ -29,23 +29,21 @@ declare global {
 
 function WizardLayout({ title, children }: { title?: string; children: React.ReactNode }) {
   return (
-    <div className="flex items-center justify-center min-h-screen bg-background p-4">
-      <div className="w-full max-w-[400px] space-y-8">
+    <div className="relative flex items-center justify-center min-h-screen bg-background p-4">
+      {/* Animated gradient background orbs */}
+      <div className="absolute inset-0 overflow-hidden pointer-events-none">
+        <div className="absolute -top-40 -left-40 w-80 h-80 bg-primary/20 rounded-full blur-3xl animate-pulse" />
+        <div className="absolute -bottom-40 -right-40 w-80 h-80 bg-primary/15 rounded-full blur-3xl animate-pulse" style={{ animationDelay: '1s' }} />
+      </div>
+
+      <div className="relative w-full max-w-[320px] space-y-8">
         <div className="flex justify-center">
-           <img 
-              src="/branding/Think_OS_Full_Word_Mark-lightmode.svg" 
-              alt="Think" 
-              className="h-12 dark:hidden" 
-            />
-            <img 
-              src="/branding/Think_OS_Full_Word_Mark.svg" 
-              alt="Think" 
-              className="h-12 hidden dark:block" 
-            />
+          <img src="./branding/Think_OS_Full_Word_Mark-lightmode.svg" alt="Think" className="h-8 dark:hidden" />
+          <img src="./branding/Think_OS_Full_Word_Mark.svg" alt="Think" className="h-8 hidden dark:block" />
         </div>
         <Card className="shadow-large">
           <CardHeader className="pb-2">
-             {title && <CardTitle className="text-center text-lg font-semibold">{title}</CardTitle>}
+            {title && <CardTitle className="text-center text-lg font-semibold">{title}</CardTitle>}
           </CardHeader>
           <CardContent>
             {children}

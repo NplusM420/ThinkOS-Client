@@ -14,6 +14,7 @@ router = APIRouter(prefix="/api", tags=["settings"])
 class SettingsUpdate(BaseModel):
     ai_provider: Literal["ollama", "openai"] | None = None
     openai_api_key: str | None = None
+    openai_base_url: str | None = None
 
 
 class OllamaStatus(BaseModel):
@@ -39,9 +40,13 @@ class ProviderStatus(BaseModel):
 @router.get("/settings")
 async def get_settings():
     """Get current AI settings."""
+    from ..services.secrets import get_api_key
+
+    api_key = await get_api_key("openai")
     return {
         "ai_provider": settings.ai_provider,
-        "openai_api_key": "***" if settings.openai_api_key else "",
+        "openai_api_key": "***" if api_key else "",
+        "openai_base_url": settings.openai_base_url,
         "ollama_model": settings.ollama_model,
         "openai_model": settings.openai_model,
     }
@@ -50,13 +55,19 @@ async def get_settings():
 @router.post("/settings")
 async def update_settings(update: SettingsUpdate):
     """Update AI settings."""
+    from ..services.secrets import set_api_key
+
     changes = {}
 
     if update.ai_provider is not None:
         changes["ai_provider"] = update.ai_provider
 
+    if update.openai_base_url is not None:
+        changes["openai_base_url"] = update.openai_base_url
+
+    # Store API key in database (secure storage)
     if update.openai_api_key is not None:
-        changes["openai_api_key"] = update.openai_api_key
+        await set_api_key("openai", update.openai_api_key)
 
     if changes:
         save_settings(changes)
@@ -82,6 +93,8 @@ async def get_ollama_status() -> OllamaStatus:
 @router.get("/settings/provider-status")
 async def get_provider_status() -> ProviderStatus:
     """Get current provider status for sidebar indicator."""
+    from ..services.secrets import get_api_key
+
     provider = settings.ai_provider
 
     if provider == "ollama":
@@ -106,7 +119,8 @@ async def get_provider_status() -> ProviderStatus:
         )
     else:
         model = settings.openai_model
-        has_key = bool(settings.openai_api_key)
+        api_key = await get_api_key("openai")
+        has_key = bool(api_key)
         return ProviderStatus(
             provider="openai",
             model=model,

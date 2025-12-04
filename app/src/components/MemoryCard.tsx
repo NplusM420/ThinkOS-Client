@@ -5,7 +5,7 @@ import {
   Trash2,
   X,
   Link as LinkIcon,
-  Copy,
+  Maximize2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -29,6 +29,7 @@ interface MemoryCardProps {
   memory: Memory;
   onDelete: (id: number) => void;
   onRemoveTag: (memoryId: number, tagId: number) => void;
+  onExpand: (id: number) => void;
   formatDate: (date: string) => string;
 }
 
@@ -66,14 +67,9 @@ export function MemoryCard({
   memory,
   onDelete,
   onRemoveTag,
+  onExpand,
   formatDate,
 }: MemoryCardProps) {
-  const copyToClipboard = async () => {
-    if (memory.url) {
-      await navigator.clipboard.writeText(memory.url);
-    }
-  };
-
   return (
     <div
       className={cn(
@@ -96,17 +92,15 @@ export function MemoryCard({
           "transition-opacity duration-200"
         )}
       >
-        {memory.url && (
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={copyToClipboard}
-            className="h-7 w-7 text-muted-foreground hover:text-foreground"
-            title="Copy URL"
-          >
-            <Copy className="h-3.5 w-3.5" />
-          </Button>
-        )}
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={() => onExpand(memory.id)}
+          className="h-7 w-7 text-muted-foreground hover:text-foreground"
+          title="View Details"
+        >
+          <Maximize2 className="h-3.5 w-3.5" />
+        </Button>
         <Button
           variant="ghost"
           size="icon"

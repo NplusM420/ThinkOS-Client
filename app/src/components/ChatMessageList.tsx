@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { Loader2 } from "lucide-react";
+import { Loader2, Search } from "lucide-react";
 import { ChatMessage } from "./ChatMessage";
 import type { ChatMessage as ChatMessageType } from "@/types/chat";
 
@@ -11,6 +11,9 @@ interface ChatMessageListProps {
 export function ChatMessageList({ messages, isLoading }: ChatMessageListProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
 
+  // Check if any message is currently streaming
+  const hasStreamingMessage = messages.some((m) => m.isStreaming);
+
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTo({
@@ -20,6 +23,9 @@ export function ChatMessageList({ messages, isLoading }: ChatMessageListProps) {
     }
   }, [messages, isLoading]);
 
+  // Only show loading indicator before streaming starts
+  const showLoading = isLoading && !hasStreamingMessage;
+
   return (
     <div
       ref={scrollRef}
@@ -28,10 +34,14 @@ export function ChatMessageList({ messages, isLoading }: ChatMessageListProps) {
       {messages.map((message) => (
         <ChatMessage key={message.id} message={message} />
       ))}
-      {isLoading && (
+      {showLoading && (
         <div className="flex justify-start animate-slide-up">
           <div className="bg-muted p-3 rounded-lg">
-            <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Search className="h-3 w-3" />
+              <span>Searching memories...</span>
+              <Loader2 className="h-3 w-3 animate-spin" />
+            </div>
           </div>
         </div>
       )}

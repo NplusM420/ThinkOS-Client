@@ -1,5 +1,11 @@
 export type ChatMode = "idle" | "active";
 
+export interface SourceMemory {
+  id: number;
+  title: string;
+  url?: string;
+}
+
 export interface ChatMessage {
   id: string | number;
   role: "user" | "assistant";
@@ -7,6 +13,9 @@ export interface ChatMessage {
   timestamp?: Date;
   created_at?: string;
   error?: boolean;
+  sources?: SourceMemory[];
+  searched?: boolean;
+  isStreaming?: boolean;
 }
 
 export interface Conversation {

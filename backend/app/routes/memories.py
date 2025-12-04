@@ -17,8 +17,11 @@ from ..db import (
     get_all_tags,
     add_tags_to_memory,
     remove_tag_from_memory,
+    get_memory_tags,
 )
+from ..db.search import search_similar_memories
 from ..services.embeddings import get_embedding
+from ..services.query_processing import preprocess_query, extract_keywords
 from ..services.ai_processing import process_memory_async
 from ..schemas import MemoryCreate, format_memory_for_embedding
 
@@ -79,6 +82,46 @@ async def list_memories(
         "total": total,
         "has_more": offset + len(memories) < total,
     }
+
+
+@router.get("/memories/search")
+async def search_memories_semantic(
+    q: str = Query(..., min_length=1, description="Search query"),
+    limit: int = Query(20, ge=1, le=100),
+):
+    """
+    Search memories using semantic similarity.
+    Embeds the query and finds similar memories via cosine distance.
+    """
+    try:
+        # Preprocess query for better semantic matching
+        processed_query = preprocess_query(q)
+        keyword_query = extract_keywords(q)
+
+        # Generate embedding and search with hybrid vector + FTS
+        query_embedding = await get_embedding(processed_query)
+        similar = await search_similar_memories(query_embedding, limit=limit, keyword_query=keyword_query)
+
+        # Enrich with tags
+        enriched = []
+        for mem in similar:
+            tags = await get_memory_tags(mem["id"])
+            # Convert distance to relevance (FTS-only matches have no distance, default to 0.8)
+            distance = mem.get("distance")
+            relevance = 1.0 - distance if distance is not None else 0.8
+            enriched.append({
+                **mem,
+                "tags": tags,
+                "relevance": relevance,
+            })
+
+        return {
+            "memories": enriched,
+            "query": q,
+        }
+    except Exception as e:
+        logger.exception(f"Semantic search failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Search failed: {str(e)}")
 
 
 @router.get("/memories/{memory_id}")
@@ -234,3 +277,20 @@ async def remove_tag(memory_id: int, tag_id: int):
     if not removed:
         raise HTTPException(status_code=404, detail="Tag not found on this memory")
     return {"removed": True}
+
+
+@router.post("/memories/{memory_id}/regenerate-summary")
+async def regenerate_summary(memory_id: int):
+    """Regenerate AI summary for a memory."""
+    memory = await get_memory(memory_id)
+    if not memory:
+        raise HTTPException(status_code=404, detail="Memory not found")
+
+    content = memory.get("content", "")
+    if not content:
+        raise HTTPException(status_code=400, detail="Memory has no content to summarize")
+
+    # Spawn background task for AI processing (will regenerate summary + tags)
+    asyncio.create_task(process_memory_async(memory_id))
+
+    return {"success": True, "message": "Summary regeneration started"}

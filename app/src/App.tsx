@@ -68,7 +68,7 @@ function App() {
       } else if (!data.is_unlocked) {
         setAppState("locked");
       } else {
-        checkAiSetup();
+        await checkAiSetup();
       }
     } catch (err) {
       // Backend was ready but auth check failed - this is a real error
@@ -78,14 +78,36 @@ function App() {
     }
   };
 
-  const checkAiSetup = () => {
+  const checkAiSetup = async () => {
     const aiSetupComplete =
       localStorage.getItem("think_ai_setup_complete") === "true";
-    if (aiSetupComplete) {
-      setAppState("ready");
-    } else {
+
+    if (!aiSetupComplete) {
       setAppState("ai_setup");
+      return;
     }
+
+    // Verify Ollama is actually working if that's the configured provider
+    try {
+      const settingsRes = await fetch(`${API_BASE_URL}/api/settings`);
+      const settings = await settingsRes.json();
+
+      if (settings.ai_provider === "ollama") {
+        const ollamaRes = await fetch(
+          `${API_BASE_URL}/api/settings/ollama-status`
+        );
+        const ollamaStatus = await ollamaRes.json();
+
+        if (!ollamaStatus.running) {
+          setAppState("ai_setup");
+          return;
+        }
+      }
+    } catch {
+      // If checks fail, proceed to app (don't block on check failure)
+    }
+
+    setAppState("ready");
   };
 
   const fetchUserProfile = async (): Promise<string | null> => {
@@ -123,8 +145,8 @@ function App() {
     }
   };
 
-  const handleUnlock = () => {
-    checkAiSetup();
+  const handleUnlock = async () => {
+    await checkAiSetup();
   };
 
   const handleAiSetupComplete = () => {
@@ -144,8 +166,8 @@ function App() {
     return (
       <div className="flex flex-col items-center justify-center min-h-screen gap-6 bg-background">
         <div className="flex flex-col items-center gap-2">
-          <img src="/branding/Think_OS_Full_Word_Mark-lightmode.svg" alt="Think" className="h-8 dark:hidden" />
-          <img src="/branding/Think_OS_Full_Word_Mark.svg" alt="Think" className="h-8 hidden dark:block" />
+          <img src="./branding/Think_OS_Full_Word_Mark-lightmode.svg" alt="Think" className="h-8 dark:hidden" />
+          <img src="./branding/Think_OS_Full_Word_Mark.svg" alt="Think" className="h-8 hidden dark:block" />
         </div>
         <div className="flex items-center gap-3">
            <div className="animate-spin rounded-full h-5 w-5 border-2 border-primary border-t-transparent"></div>

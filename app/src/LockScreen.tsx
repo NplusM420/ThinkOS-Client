@@ -91,12 +91,12 @@ export default function LockScreen({ needsSetup, onUnlock }: Props) {
         {/* Logo */}
         <div className="flex justify-center">
           <img
-            src="/branding/Think_OS_Full_Word_Mark-lightmode.svg"
+            src="./branding/Think_OS_Full_Word_Mark-lightmode.svg"
             alt="Think"
             className="h-8 dark:hidden"
           />
           <img
-            src="/branding/Think_OS_Full_Word_Mark.svg"
+            src="./branding/Think_OS_Full_Word_Mark.svg"
             alt="Think"
             className="h-8 hidden dark:block"
           />
@@ -119,7 +119,7 @@ export default function LockScreen({ needsSetup, onUnlock }: Props) {
 
         {/* Minimal Card */}
         <Card className={cn(
-          "shadow-large bg-white/70 dark:bg-white/5 backdrop-blur-xl border-white/60 dark:border-white/10",
+          "shadow-large",
           shaking && "animate-shake"
         )}>
           <CardContent className="pt-6 pb-6">

@@ -1,16 +1,20 @@
-import { createContext, useContext, useState, useCallback, ReactNode } from "react";
+import { createContext, useContext, useState, useCallback, useMemo, ReactNode } from "react";
 import { API_BASE_URL } from "@/constants";
-import type { Conversation, ChatMessage, ConversationDetail } from "@/types/chat";
+import type { Conversation, ChatMessage, ConversationDetail, SourceMemory } from "@/types/chat";
 
 interface ConversationContextType {
   currentConversationId: number | null;
   messages: ChatMessage[];
+  allSources: SourceMemory[];
   isLoadingMessages: boolean;
+  pendingMessage: string | null;
   selectConversation: (conversation: Conversation | null) => void;
   startNewChat: () => void;
   setCurrentConversationId: (id: number | null) => void;
   addMessage: (message: ChatMessage) => void;
+  updateMessage: (id: string | number, updates: Partial<ChatMessage>) => void;
   clearMessages: () => void;
+  setPendingMessage: (message: string | null) => void;
 }
 
 const ConversationContext = createContext<ConversationContextType | null>(null);
@@ -19,6 +23,7 @@ export function ConversationProvider({ children }: { children: ReactNode }) {
   const [currentConversationId, setCurrentConversationId] = useState<number | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isLoadingMessages, setIsLoadingMessages] = useState(false);
+  const [pendingMessage, setPendingMessage] = useState<string | null>(null);
 
   const loadConversation = useCallback(async (conversationId: number) => {
     setIsLoadingMessages(true);
@@ -30,6 +35,7 @@ export function ConversationProvider({ children }: { children: ReactNode }) {
           data.messages.map((m) => ({
             ...m,
             timestamp: new Date(m.created_at || ""),
+            sources: m.sources || [],
           }))
         );
       }
@@ -39,6 +45,21 @@ export function ConversationProvider({ children }: { children: ReactNode }) {
       setIsLoadingMessages(false);
     }
   }, []);
+
+  // Aggregate all sources from messages, deduplicated by id
+  const allSources = useMemo(() => {
+    const sourceMap = new Map<number, SourceMemory>();
+    for (const msg of messages) {
+      if (msg.sources) {
+        for (const src of msg.sources) {
+          if (!sourceMap.has(src.id)) {
+            sourceMap.set(src.id, src);
+          }
+        }
+      }
+    }
+    return Array.from(sourceMap.values());
+  }, [messages]);
 
   const selectConversation = useCallback(
     (conversation: Conversation | null) => {
@@ -62,6 +83,12 @@ export function ConversationProvider({ children }: { children: ReactNode }) {
     setMessages((prev) => [...prev, message]);
   }, []);
 
+  const updateMessage = useCallback((id: string | number, updates: Partial<ChatMessage>) => {
+    setMessages((prev) =>
+      prev.map((msg) => (msg.id === id ? { ...msg, ...updates } : msg))
+    );
+  }, []);
+
   const clearMessages = useCallback(() => {
     setMessages([]);
   }, []);
@@ -71,12 +98,16 @@ export function ConversationProvider({ children }: { children: ReactNode }) {
       value={{
         currentConversationId,
         messages,
+        allSources,
         isLoadingMessages,
+        pendingMessage,
         selectConversation,
         startNewChat,
         setCurrentConversationId,
         addMessage,
+        updateMessage,
         clearMessages,
+        setPendingMessage,
       }}
     >
       {children}

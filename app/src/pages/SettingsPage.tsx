@@ -9,6 +9,7 @@ import { Theme, setTheme, getTheme } from "@/hooks/useSystemTheme";
 interface Settings {
   ai_provider: string;
   openai_api_key: string;
+  openai_base_url: string;
 }
 
 interface OllamaStatus {
@@ -24,12 +25,14 @@ export default function SettingsPage({ onNameChange }: SettingsPageProps) {
   const [settings, setSettings] = useState<Settings>({
     ai_provider: "ollama",
     openai_api_key: "",
+    openai_base_url: "",
   });
   const [ollamaStatus, setOllamaStatus] = useState<OllamaStatus>({
     installed: false,
     running: false,
   });
   const [apiKey, setApiKey] = useState("");
+  const [baseUrl, setBaseUrl] = useState("");
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
 
@@ -54,6 +57,7 @@ export default function SettingsPage({ onNameChange }: SettingsPageProps) {
       if (res.ok) {
         const data = await res.json();
         setSettings(data);
+        setBaseUrl(data.openai_base_url || "");
       }
     } catch (err) {
       console.error("Failed to fetch settings:", err);
@@ -112,8 +116,9 @@ export default function SettingsPage({ onNameChange }: SettingsPageProps) {
     setSaving(true);
     setSaved(false);
     try {
-      const updates: { ai_provider?: string; openai_api_key?: string } = {
+      const updates: { ai_provider?: string; openai_api_key?: string; openai_base_url?: string } = {
         ai_provider: settings.ai_provider,
+        openai_base_url: baseUrl,
       };
 
       if (apiKey) {
@@ -290,38 +295,63 @@ export default function SettingsPage({ onNameChange }: SettingsPageProps) {
                   )}
                 </div>
                 <div className="text-left">
-                  <p className="font-medium">OpenAI</p>
+                  <p className="font-medium">Cloud API</p>
                   <p className="text-sm text-muted-foreground">
-                    Cloud-based, requires API key
+                    OpenAI or compatible services
                   </p>
                 </div>
               </div>
             </button>
           </div>
 
-          {settings.ai_provider === "openai" && (
+          {settings.ai_provider === "ollama" && !ollamaStatus.running && (
             <div className="pt-2">
-              <label className="text-sm font-medium">OpenAI API Key</label>
-              <Input
-                type="password"
-                placeholder={
-                  settings.openai_api_key ? "••• Key saved •••" : "sk-..."
-                }
-                value={apiKey}
-                onChange={(e) => setApiKey(e.target.value)}
-                className="mt-1"
-              />
-              <p className="text-xs text-muted-foreground mt-1">
-                Get your API key from{" "}
-                <a
-                  href="https://platform.openai.com/api-keys"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="underline"
-                >
-                  platform.openai.com
-                </a>
+              <Button
+                variant="outline"
+                className="w-full"
+                onClick={() => {
+                  localStorage.removeItem("think_ai_setup_complete");
+                  window.location.reload();
+                }}
+              >
+                Run Ollama Setup Wizard
+              </Button>
+              <p className="text-xs text-muted-foreground mt-1 text-center">
+                Install or start Ollama to use local AI
               </p>
+            </div>
+          )}
+
+          {settings.ai_provider === "openai" && (
+            <div className="pt-2 space-y-4">
+              <div>
+                <label className="text-sm font-medium">API Base URL</label>
+                <Input
+                  type="text"
+                  placeholder="https://api.openai.com/v1"
+                  value={baseUrl}
+                  onChange={(e) => setBaseUrl(e.target.value)}
+                  className="mt-1"
+                />
+                <p className="text-xs text-muted-foreground mt-1">
+                  Leave empty for OpenAI, or enter a custom endpoint for compatible services
+                </p>
+              </div>
+              <div>
+                <label className="text-sm font-medium">API Key</label>
+                <Input
+                  type="password"
+                  placeholder={
+                    settings.openai_api_key ? "••• Key saved •••" : "Enter API key"
+                  }
+                  value={apiKey}
+                  onChange={(e) => setApiKey(e.target.value)}
+                  className="mt-1"
+                />
+                <p className="text-xs text-muted-foreground mt-1">
+                  API key from your provider (OpenAI, Azure, etc.)
+                </p>
+              </div>
             </div>
           )}
 

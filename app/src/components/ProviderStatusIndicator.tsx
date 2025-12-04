@@ -16,7 +16,7 @@ function getStatusColor(status: ProviderStatus["status"]): string {
 }
 
 function getProviderLabel(provider: ProviderStatus["provider"]): string {
-  return provider === "ollama" ? "Ollama" : "OpenAI";
+  return provider === "ollama" ? "Ollama" : "Cloud API";
 }
 
 export default function ProviderStatusIndicator() {

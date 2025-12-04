@@ -1,5 +1,4 @@
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Send, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -28,18 +27,34 @@ export function ChatInput({
   };
 
   return (
-    <div className={cn("relative", className)}>
-      <Input
+    <div
+      className={cn(
+        "relative flex items-center gap-2 p-2 rounded-full",
+        // Glassmorphism
+        "bg-white/70 dark:bg-white/5 backdrop-blur-xl",
+        "border border-white/60 dark:border-white/10",
+        // Floating shadow
+        "shadow-lg shadow-black/5 dark:shadow-black/20",
+        className
+      )}
+    >
+      <input
+        type="text"
         value={value}
         onChange={(e) => onChange(e.target.value)}
         onKeyDown={handleKeyDown}
         placeholder={placeholder}
-        className="pr-12 h-12 text-base"
         disabled={isLoading}
+        className={cn(
+          "flex-1 bg-transparent px-4 py-2 text-base",
+          "placeholder:text-muted-foreground/60",
+          "focus:outline-none",
+          "disabled:opacity-50"
+        )}
       />
       <Button
         size="icon"
-        className="absolute right-1 top-1 h-10 w-10"
+        className="h-10 w-10 rounded-full shrink-0"
         onClick={onSubmit}
         disabled={isLoading || !value.trim()}
       >

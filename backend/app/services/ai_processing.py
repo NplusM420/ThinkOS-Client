@@ -10,6 +10,7 @@ from ..db.crud import (
     update_memory_title,
     add_tags_to_memory,
     get_all_tags,
+    update_conversation_title,
 )
 from ..events import event_manager, MemoryEvent, EventType
 
@@ -18,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 async def generate_summary(content: str, title: str = "") -> str:
     """Generate a concise summary for memory content."""
-    client = get_client()
+    client = await get_client()
     model = get_model()
 
     prompt = f"""Summarize the following content in 1-2 sentences. Be concise and capture the main idea.
@@ -45,7 +46,7 @@ Summary:"""
 
 async def generate_title(content: str, original_title: str = "") -> str:
     """Generate a concise title (5-10 words) from content."""
-    client = get_client()
+    client = await get_client()
     model = get_model()
 
     prompt = f"""Generate a concise, descriptive title for this webpage content.
@@ -91,7 +92,7 @@ async def generate_tags(content: str, title: str, existing_tags: list[str]) -> l
     Returns:
         List of tag names (3-5 tags)
     """
-    client = get_client()
+    client = await get_client()
     model = get_model()
 
     existing_tags_str = ", ".join(existing_tags[:50]) if existing_tags else "none yet"
@@ -220,3 +221,64 @@ async def process_memory_async(memory_id: int) -> None:
 
     except Exception as e:
         logger.error(f"Failed to process memory {memory_id}: {e}")
+
+
+async def generate_conversation_title(message: str) -> str:
+    """Generate a short title summarizing a conversation's first message."""
+    client = await get_client()
+    model = get_model()
+
+    prompt = f"""Generate a concise title for this chat message.
+
+Message: {message[:500]}
+
+Requirements:
+- 5-8 words maximum
+- Capture the main topic or intent
+- Be informative and scannable
+
+Title:"""
+
+    try:
+        response = await client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": "You are a helpful assistant that creates concise chat titles. Respond with only the title, no quotes or extra formatting."},
+                {"role": "user", "content": prompt}
+            ],
+            max_tokens=50,
+        )
+        title = response.choices[0].message.content.strip() if response.choices[0].message.content else ""
+        # Remove quotes if the model wrapped the title
+        if title.startswith('"') and title.endswith('"'):
+            title = title[1:-1]
+        return title
+    except Exception as e:
+        logger.error(f"Failed to generate conversation title: {e}")
+        return ""
+
+
+async def process_conversation_title_async(conversation_id: int, message: str) -> None:
+    """Background task to generate and update conversation title.
+
+    Generates an AI summary title for a conversation based on the first message.
+    This function is designed to be run as a background task.
+    """
+    try:
+        title = await generate_conversation_title(message)
+
+        if title:
+            await update_conversation_title(conversation_id, title)
+            logger.info(f"Updated conversation {conversation_id} title: '{title}'")
+
+            # Emit update event so clients can refresh with AI-generated title
+            await event_manager.publish(
+                MemoryEvent(
+                    type=EventType.CONVERSATION_UPDATED,
+                    memory_id=conversation_id,
+                    data={"title": title},
+                )
+            )
+
+    except Exception as e:
+        logger.error(f"Failed to process conversation title {conversation_id}: {e}")

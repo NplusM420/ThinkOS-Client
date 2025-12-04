@@ -71,3 +71,16 @@ class Message(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     conversation: Mapped["Conversation"] = relationship(back_populates="messages")
+    sources: Mapped[list["MessageSource"]] = relationship(back_populates="message", cascade="all, delete-orphan")
+
+
+class MessageSource(Base):
+    __tablename__ = "message_sources"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    message_id: Mapped[int] = mapped_column(ForeignKey("messages.id", ondelete="CASCADE"))
+    memory_id: Mapped[int] = mapped_column(ForeignKey("memories.id", ondelete="CASCADE"))
+    relevance_score: Mapped[float | None] = mapped_column(nullable=True)
+
+    message: Mapped["Message"] = relationship(back_populates="sources")
+    memory: Mapped["Memory"] = relationship()

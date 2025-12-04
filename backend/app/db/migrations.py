@@ -176,6 +176,81 @@ def migration_006(conn: Connection) -> None:
         """))
 
 
+@migration(7, "Create message_sources table for persisting chat sources")
+def migration_007(conn: Connection) -> None:
+    """Create message_sources table for storing RAG sources per message."""
+    result = conn.execute(text(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='message_sources'"
+    )).fetchone()
+
+    if not result:
+        conn.execute(text("""
+            CREATE TABLE message_sources (
+                id INTEGER PRIMARY KEY,
+                message_id INTEGER NOT NULL,
+                memory_id INTEGER NOT NULL,
+                relevance_score REAL,
+                FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE,
+                FOREIGN KEY (memory_id) REFERENCES memories(id) ON DELETE CASCADE,
+                UNIQUE(message_id, memory_id)
+            )
+        """))
+        # Index for efficient lookups
+        conn.execute(text("""
+            CREATE INDEX idx_message_sources_message_id ON message_sources(message_id)
+        """))
+
+
+@migration(8, "Add FTS5 full-text search for memories")
+def migration_008(conn: Connection) -> None:
+    """Create FTS5 virtual table for hybrid search."""
+    result = conn.execute(text(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='memories_fts'"
+    )).fetchone()
+
+    if not result:
+        # Create FTS5 virtual table
+        conn.execute(text("""
+            CREATE VIRTUAL TABLE memories_fts USING fts5(
+                title,
+                content,
+                content='memories',
+                content_rowid='id'
+            )
+        """))
+
+        # Populate with existing data
+        conn.execute(text("""
+            INSERT INTO memories_fts(rowid, title, content)
+            SELECT id, COALESCE(title, ''), COALESCE(content, '')
+            FROM memories
+        """))
+
+        # Create triggers to keep FTS in sync
+        conn.execute(text("""
+            CREATE TRIGGER memories_fts_ai AFTER INSERT ON memories BEGIN
+                INSERT INTO memories_fts(rowid, title, content)
+                VALUES (new.id, COALESCE(new.title, ''), COALESCE(new.content, ''));
+            END
+        """))
+
+        conn.execute(text("""
+            CREATE TRIGGER memories_fts_ad AFTER DELETE ON memories BEGIN
+                INSERT INTO memories_fts(memories_fts, rowid, title, content)
+                VALUES ('delete', old.id, COALESCE(old.title, ''), COALESCE(old.content, ''));
+            END
+        """))
+
+        conn.execute(text("""
+            CREATE TRIGGER memories_fts_au AFTER UPDATE ON memories BEGIN
+                INSERT INTO memories_fts(memories_fts, rowid, title, content)
+                VALUES ('delete', old.id, COALESCE(old.title, ''), COALESCE(old.content, ''));
+                INSERT INTO memories_fts(rowid, title, content)
+                VALUES (new.id, COALESCE(new.title, ''), COALESCE(new.content, ''));
+            END
+        """))
+
+
 # --- Migration runner ---
 
 def run_migrations(conn: Connection) -> list[tuple[int, str]]:

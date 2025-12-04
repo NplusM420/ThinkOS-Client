@@ -8,6 +8,7 @@ import { useMemoryEvents } from "../hooks/useMemoryEvents";
 import { ChatInput } from "@/components/ChatInput";
 import { ChatMessageList } from "@/components/ChatMessageList";
 import { ChatSidebar } from "@/components/ChatSidebar";
+import { ChatSourcesPanel } from "@/components/ChatSourcesPanel";
 import { useConversation } from "@/contexts/ConversationContext";
 import { useConversations } from "@/hooks/useConversations";
 import type { ChatMode, ChatMessage } from "@/types/chat";
@@ -44,10 +45,14 @@ export default function HomePage({ userName }: HomePageProps) {
   const {
     currentConversationId,
     messages,
+    allSources,
     isLoadingMessages,
+    pendingMessage,
     setCurrentConversationId,
     addMessage,
+    updateMessage,
     selectConversation,
+    setPendingMessage,
   } = useConversation();
 
   const { conversations } = useConversations();
@@ -58,6 +63,14 @@ export default function HomePage({ userName }: HomePageProps) {
   useEffect(() => {
     fetchRecentMemories();
   }, []);
+
+  // Consume pending message from context (e.g., from "Add to Chat" in memory panel)
+  useEffect(() => {
+    if (pendingMessage) {
+      setMessage(pendingMessage);
+      setPendingMessage(null);
+    }
+  }, [pendingMessage, setPendingMessage]);
 
   // Real-time updates via SSE
   useMemoryEvents({
@@ -102,12 +115,23 @@ export default function HomePage({ userName }: HomePageProps) {
       timestamp: new Date(),
     };
 
+    const assistantMessageId = crypto.randomUUID();
+
     addMessage(userMessage);
     setMessage("");
     setIsLoading(true);
 
+    // Add empty assistant message for streaming
+    addMessage({
+      id: assistantMessageId,
+      role: "assistant",
+      content: "",
+      timestamp: new Date(),
+      isStreaming: true,
+    });
+
     try {
-      const res = await fetch(`${API_BASE_URL}/api/chat`, {
+      const res = await fetch(`${API_BASE_URL}/api/chat/stream`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -116,31 +140,61 @@ export default function HomePage({ userName }: HomePageProps) {
         }),
       });
 
-      const data = await res.json();
-
-      // Update conversation ID if this was a new conversation
-      if (data.conversation_id && !currentConversationId) {
-        setCurrentConversationId(data.conversation_id);
+      if (!res.ok) {
+        throw new Error("Failed to connect");
       }
 
-      const assistantMessage: ChatMessage = {
-        id: crypto.randomUUID(),
-        role: "assistant",
-        content: data.error || data.response || "No response",
-        timestamp: new Date(),
-        error: !!data.error,
-      };
+      const reader = res.body?.getReader();
+      if (!reader) throw new Error("No reader available");
 
-      addMessage(assistantMessage);
+      const decoder = new TextDecoder();
+      let content = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        const chunk = decoder.decode(value, { stream: true });
+        const lines = chunk.split("\n");
+
+        for (const line of lines) {
+          if (line.startsWith("data: ")) {
+            try {
+              const data = JSON.parse(line.slice(6));
+
+              if (data.type === "meta") {
+                // Update conversation ID and sources
+                if (data.conversation_id && !currentConversationId) {
+                  setCurrentConversationId(data.conversation_id);
+                }
+                updateMessage(assistantMessageId, {
+                  sources: data.sources || [],
+                  searched: data.searched || false,
+                });
+              } else if (data.type === "token") {
+                content += data.content;
+                updateMessage(assistantMessageId, { content });
+              } else if (data.type === "done") {
+                updateMessage(assistantMessageId, { isStreaming: false });
+              } else if (data.type === "error") {
+                updateMessage(assistantMessageId, {
+                  content: data.message,
+                  error: true,
+                  isStreaming: false,
+                });
+              }
+            } catch {
+              // Ignore parse errors for incomplete chunks
+            }
+          }
+        }
+      }
     } catch (err) {
-      const errorMessage: ChatMessage = {
-        id: crypto.randomUUID(),
-        role: "assistant",
+      updateMessage(assistantMessageId, {
         content: "Failed to connect to the server",
-        timestamp: new Date(),
         error: true,
-      };
-      addMessage(errorMessage);
+        isStreaming: false,
+      });
       console.error("Chat failed:", err);
     } finally {
       setIsLoading(false);
@@ -168,8 +222,11 @@ export default function HomePage({ userName }: HomePageProps) {
             <ChatMessageList messages={messages} isLoading={isLoading} />
           )}
 
-          {/* Input at bottom */}
-          <div className="flex-none p-4 border-t bg-background">
+          {/* Sources panel */}
+          <ChatSourcesPanel sources={allSources} />
+
+          {/* Floating input at bottom */}
+          <div className="flex-none p-4">
             <div className="max-w-2xl mx-auto">
               <ChatInput
                 value={message}
@@ -218,13 +275,15 @@ export default function HomePage({ userName }: HomePageProps) {
                   No memories yet
                 </p>
               ) : (
-                <ul className="space-y-2">
+                <ul className="space-y-1">
                   {recentMemories.map((memory) => (
-                    <li
-                      key={memory.id}
-                      className="text-sm truncate text-muted-foreground"
-                    >
-                      {memory.title || "Untitled"}
+                    <li key={memory.id}>
+                      <Link
+                        to={`/memories?open=${memory.id}`}
+                        className="block text-sm truncate text-muted-foreground hover:text-foreground transition-colors py-1 -mx-2 px-2 rounded hover:bg-muted"
+                      >
+                        {memory.title || "Untitled"}
+                      </Link>
                     </li>
                   ))}
                 </ul>

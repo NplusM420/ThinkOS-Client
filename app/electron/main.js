@@ -3,7 +3,7 @@ const { spawn, execSync } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const https = require('https');
-const { installNativeHost } = require('../scripts/install-native-host');
+const { installNativeHost } = require('./install-native-host');
 
 let mainWindow;
 let pythonProcess;
@@ -142,6 +142,13 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false
+    }
+  });
+
+  // Re-send backend-ready on page reload if backend is already running
+  mainWindow.webContents.on('did-finish-load', () => {
+    if (backendReady) {
+      mainWindow.webContents.send('backend-ready');
     }
   });
 

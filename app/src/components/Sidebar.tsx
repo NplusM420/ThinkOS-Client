@@ -22,9 +22,9 @@ export default function Sidebar() {
     <aside className="w-[72px] h-screen border-r bg-muted/30 flex flex-col py-4">
       <div className="flex justify-center mb-6">
         <div className="w-10 h-10 flex items-center justify-center">
-          <img 
-            src="/icons/think-os-agent-grey.svg" 
-            alt="Think" 
+          <img
+            src="./icons/think-os-agent-grey.svg"
+            alt="Think"
             className="w-full h-full object-contain"
           />
         </div>
