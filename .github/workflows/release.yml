@@ -1,0 +1,34 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  # Placeholder: Build jobs will be added in the build pipeline phase
+  # This workflow is triggered when a version tag is pushed
+
+  create-release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          draft: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # TODO: Add the following jobs in the build pipeline phase:
+  # - build-app-macos: Build Electron app for macOS (DMG)
+  # - build-app-windows: Build Electron app for Windows (NSIS)
+  # - build-extension: Build Chrome extension (ZIP)
+  # - build-backend-macos: Build Python backend for macOS
+  # - build-backend-windows: Build Python backend for Windows
