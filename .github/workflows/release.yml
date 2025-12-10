@@ -60,13 +60,24 @@ jobs:
           path: think-extension-${{ github.ref_name }}.zip
           retention-days: 1
 
-  build-backend-macos:
-    name: Build Python Backend (macOS)
+  build-macos:
+    name: Build macOS App
     runs-on: macos-latest
     needs: create-release
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -83,11 +94,17 @@ jobs:
       - name: Install SQLCipher
         run: brew install sqlcipher
 
+      - name: Install pnpm dependencies
+        run: pnpm install --frozen-lockfile
+
       - name: Install backend dependencies
         working-directory: backend
         run: |
+          export C_INCLUDE_PATH="$(brew --prefix sqlcipher)/include"
+          export LIBRARY_PATH="$(brew --prefix sqlcipher)/lib"
           export CFLAGS="-I$(brew --prefix sqlcipher)/include"
           export LDFLAGS="-L$(brew --prefix sqlcipher)/lib"
+          poetry run pip install pysqlcipher3 --no-cache-dir
           poetry install
 
       - name: Import Code Signing Certificate
@@ -106,100 +123,16 @@ jobs:
           security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
           security list-keychain -d user -s $KEYCHAIN_PATH
 
-      - name: Build native stub
-        working-directory: backend/native_host
-        run: |
-          clang -O2 -o think-native-stub stub_launcher.c
-          codesign --sign "${{ secrets.CODESIGN_IDENTITY }}" --force \
-            --timestamp --options runtime think-native-stub
-
-      - name: Build backend with PyInstaller
-        working-directory: backend
+      - name: Build all (stub + backend + app)
         env:
           CODESIGN_IDENTITY: ${{ secrets.CODESIGN_IDENTITY }}
-        run: poetry run pyinstaller think.spec --clean
-
-      - name: Sign dylibs
-        working-directory: backend
-        run: |
-          find dist/think-backend \( -name '*.dylib' -o -name '*.so' \) \
-            -exec codesign --force --sign "${{ secrets.CODESIGN_IDENTITY }}" \
-            --timestamp --options runtime {} \;
-
-      - name: Copy native stub to dist
-        run: cp backend/native_host/think-native-stub backend/dist/
-
-      - name: Upload backend artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: backend-macos
-          path: |
-            backend/dist/think-backend
-            backend/dist/think-native-stub
-          retention-days: 1
-
-  build-app-macos:
-    name: Build Electron App (macOS)
-    runs-on: macos-latest
-    needs: [create-release, build-backend-macos]
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 10
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: 'pnpm'
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Download backend artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: backend-macos
-          path: backend/dist
-
-      - name: Set executable permissions
-        run: |
-          chmod +x backend/dist/think-native-stub
-          chmod +x backend/dist/think-backend/think-backend
-
-      - name: Import Code Signing Certificate
-        env:
-          MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
-          MACOS_CERTIFICATE_PWD: ${{ secrets.MACOS_CERTIFICATE_PWD }}
-        run: |
-          KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
-          KEYCHAIN_PASSWORD=$(openssl rand -base64 32)
-          echo "$MACOS_CERTIFICATE" | base64 --decode > $RUNNER_TEMP/certificate.p12
-          security create-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
-          security set-keychain-settings -lut 21600 $KEYCHAIN_PATH
-          security unlock-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
-          security import $RUNNER_TEMP/certificate.p12 -P "$MACOS_CERTIFICATE_PWD" \
-            -A -t cert -f pkcs12 -k $KEYCHAIN_PATH
-          security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
-          security list-keychain -d user -s $KEYCHAIN_PATH
-
-      - name: Build Vite app
-        run: pnpm --filter think-app build
-
-      - name: Build Electron app with notarization
-        working-directory: app
-        env:
           NOTARIZE: '1'
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           CSC_LINK: ${{ secrets.MACOS_CERTIFICATE }}
           CSC_KEY_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PWD }}
-        run: pnpm electron:build:release
+        run: pnpm build:all:release
 
       - name: Upload DMG artifact
         uses: actions/upload-artifact@v4
@@ -211,7 +144,7 @@ jobs:
   upload-release:
     name: Upload Release Artifacts
     runs-on: ubuntu-latest
-    needs: [create-release, build-extension, build-app-macos]
+    needs: [create-release, build-extension, build-macos]
     permissions:
       contents: write
     steps:
