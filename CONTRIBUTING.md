@@ -99,6 +99,8 @@ Releases use Changesets with unified versioning across all components.
 2. Changesets bot opens a "Version Packages" PR
 3. Merge that PR when ready to release
 4. A git tag is created and release workflow runs
+5. CI builds macOS DMG and Chrome extension automatically
+6. Review the draft GitHub Release and publish when ready
 
 ### Pre-release Versions
 
