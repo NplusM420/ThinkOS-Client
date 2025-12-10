@@ -6,9 +6,6 @@ on:
       - 'v*'
 
 jobs:
-  # Placeholder: Build jobs will be added in the build pipeline phase
-  # This workflow is triggered when a version tag is pushed
-
   create-release:
     name: Create GitHub Release
     runs-on: ubuntu-latest
@@ -26,9 +23,209 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  # TODO: Add the following jobs in the build pipeline phase:
-  # - build-app-macos: Build Electron app for macOS (DMG)
-  # - build-app-windows: Build Electron app for Windows (NSIS)
-  # - build-extension: Build Chrome extension (ZIP)
-  # - build-backend-macos: Build Python backend for macOS
-  # - build-backend-windows: Build Python backend for Windows
+  build-extension:
+    name: Build Chrome Extension
+    runs-on: ubuntu-latest
+    needs: create-release
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build extension
+        run: pnpm --filter think-extension build
+
+      - name: Create ZIP archive
+        run: |
+          cd extension/dist
+          zip -r ../../think-extension-${{ github.ref_name }}.zip .
+
+      - name: Upload extension artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: chrome-extension
+          path: think-extension-${{ github.ref_name }}.zip
+          retention-days: 1
+
+  build-backend-macos:
+    name: Build Python Backend (macOS)
+    runs-on: macos-latest
+    needs: create-release
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+        with:
+          version: '1.8.0'
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+
+      - name: Install SQLCipher
+        run: brew install sqlcipher
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: poetry install
+
+      - name: Import Code Signing Certificate
+        env:
+          MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
+          MACOS_CERTIFICATE_PWD: ${{ secrets.MACOS_CERTIFICATE_PWD }}
+        run: |
+          KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
+          KEYCHAIN_PASSWORD=$(openssl rand -base64 32)
+          echo "$MACOS_CERTIFICATE" | base64 --decode > $RUNNER_TEMP/certificate.p12
+          security create-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+          security set-keychain-settings -lut 21600 $KEYCHAIN_PATH
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+          security import $RUNNER_TEMP/certificate.p12 -P "$MACOS_CERTIFICATE_PWD" \
+            -A -t cert -f pkcs12 -k $KEYCHAIN_PATH
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+          security list-keychain -d user -s $KEYCHAIN_PATH
+
+      - name: Build native stub
+        working-directory: backend/native_host
+        run: |
+          clang -O2 -o think-native-stub stub_launcher.c
+          codesign --sign "${{ secrets.CODESIGN_IDENTITY }}" --force \
+            --timestamp --options runtime think-native-stub
+
+      - name: Build backend with PyInstaller
+        working-directory: backend
+        env:
+          CODESIGN_IDENTITY: ${{ secrets.CODESIGN_IDENTITY }}
+        run: poetry run pyinstaller think.spec --clean
+
+      - name: Sign dylibs
+        working-directory: backend
+        run: |
+          find dist/think-backend \( -name '*.dylib' -o -name '*.so' \) \
+            -exec codesign --force --sign "${{ secrets.CODESIGN_IDENTITY }}" \
+            --timestamp --options runtime {} \;
+
+      - name: Copy native stub to dist
+        run: cp backend/native_host/think-native-stub backend/dist/
+
+      - name: Upload backend artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-macos
+          path: |
+            backend/dist/think-backend
+            backend/dist/think-native-stub
+          retention-days: 1
+
+  build-app-macos:
+    name: Build Electron App (macOS)
+    runs-on: macos-latest
+    needs: [create-release, build-backend-macos]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Download backend artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: backend-macos
+          path: backend/dist
+
+      - name: Set executable permissions
+        run: |
+          chmod +x backend/dist/think-native-stub
+          chmod +x backend/dist/think-backend/think-backend
+
+      - name: Import Code Signing Certificate
+        env:
+          MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
+          MACOS_CERTIFICATE_PWD: ${{ secrets.MACOS_CERTIFICATE_PWD }}
+        run: |
+          KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
+          KEYCHAIN_PASSWORD=$(openssl rand -base64 32)
+          echo "$MACOS_CERTIFICATE" | base64 --decode > $RUNNER_TEMP/certificate.p12
+          security create-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+          security set-keychain-settings -lut 21600 $KEYCHAIN_PATH
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+          security import $RUNNER_TEMP/certificate.p12 -P "$MACOS_CERTIFICATE_PWD" \
+            -A -t cert -f pkcs12 -k $KEYCHAIN_PATH
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+          security list-keychain -d user -s $KEYCHAIN_PATH
+
+      - name: Build Vite app
+        run: pnpm --filter think-app build
+
+      - name: Build Electron app with notarization
+        working-directory: app
+        env:
+          NOTARIZE: '1'
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          CSC_LINK: ${{ secrets.MACOS_CERTIFICATE }}
+          CSC_KEY_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PWD }}
+        run: pnpm electron:build:release
+
+      - name: Upload DMG artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: electron-app-macos
+          path: app/release/*.dmg
+          retention-days: 1
+
+  upload-release:
+    name: Upload Release Artifacts
+    runs-on: ubuntu-latest
+    needs: [create-release, build-extension, build-app-macos]
+    permissions:
+      contents: write
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: List artifacts
+        run: find artifacts -type f
+
+      - name: Upload to Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            artifacts/chrome-extension/*.zip
+            artifacts/electron-app-macos/*.dmg
+          draft: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
