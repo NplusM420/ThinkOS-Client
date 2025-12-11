@@ -38,7 +38,7 @@ jobs:
         id: changesets
         uses: changesets/action@v1
         with:
-          version: pnpm version
+          version: pnpm run version
           publish: echo "Publishing disabled - handled by release workflow"
           title: 'chore(release): version packages'
           commit: 'chore(release): version packages'
