@@ -36,7 +36,13 @@ export default function LockScreen({ needsSetup, onUnlock }: Props) {
   };
 
   const handleSetup = async () => {
-    if (password.length < 8 || password !== confirmPassword) {
+    if (password.length < 8) {
+      console.error('[LockScreen] Password too short:', password.length, 'chars (need 8+)');
+      triggerShake();
+      return;
+    }
+    if (password !== confirmPassword) {
+      console.error('[LockScreen] Passwords do not match');
       triggerShake();
       return;
     }
@@ -44,6 +50,7 @@ export default function LockScreen({ needsSetup, onUnlock }: Props) {
     setLoading(true);
 
     try {
+      console.log('[LockScreen] Calling /api/auth/setup...');
       const res = await apiFetch('/api/auth/setup', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -51,13 +58,17 @@ export default function LockScreen({ needsSetup, onUnlock }: Props) {
       });
 
       if (res.ok) {
+        console.log('[LockScreen] Setup successful!');
         setSuccess(true);
         setTimeout(() => onUnlock(), 600);
       } else {
+        const errorText = await res.text();
+        console.error('[LockScreen] Setup failed:', res.status, errorText);
         triggerShake();
         setLoading(false);
       }
-    } catch {
+    } catch (err) {
+      console.error('[LockScreen] Setup error:', err);
       triggerShake();
       setLoading(false);
     }

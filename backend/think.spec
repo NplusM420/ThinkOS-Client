@@ -6,7 +6,10 @@ from pathlib import Path
 # Find sqlite-vec dylib
 import sqlite_vec
 sqlite_vec_dir = Path(sqlite_vec.__file__).parent
-sqlite_vec_dylib = sqlite_vec_dir / 'vec0.dylib'
+if sys.platform == 'win32':
+    sqlite_vec_ext = sqlite_vec_dir / 'vec0.dll'
+else:
+    sqlite_vec_ext = sqlite_vec_dir / 'vec0.dylib'
 
 # Detect platform for SQLCipher library
 if sys.platform == 'darwin':
@@ -24,8 +27,8 @@ else:
 binaries = []
 if os.path.exists(sqlcipher_lib):
     binaries.append((sqlcipher_lib, '.'))
-if sqlite_vec_dylib.exists():
-    binaries.append((str(sqlite_vec_dylib), 'sqlite_vec'))
+if sqlite_vec_ext.exists():
+    binaries.append((str(sqlite_vec_ext), 'sqlite_vec'))
 
 a = Analysis(
     ['run.py'],
@@ -93,3 +96,4 @@ coll = COLLECT(
 # Note: Native messaging stub is now compiled as pure C via 'pnpm build:stub'
 # This eliminates the Python.framework dependency that caused Gatekeeper issues on macOS
 # See: backend/native_host/stub.c
+
