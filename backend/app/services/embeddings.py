@@ -13,9 +13,7 @@ logger = logging.getLogger(__name__)
 
 def get_current_embedding_model() -> str:
     """Get the current embedding model identifier (provider:model)."""
-    if config.settings.embedding_provider == "openai":
-        return f"openai:{config.settings.openai_embedding_model}"
-    return f"ollama:{config.settings.ollama_embedding_model}"
+    return f"{config.settings.embedding_provider}:{config.settings.embedding_model}"
 
 
 # Context windows for embedding models (in tokens)
@@ -52,22 +50,20 @@ async def get_embedding(text: str) -> list[float]:
         raise ValueError("Cannot generate embedding for empty text")
 
     # Get context limit for current model
-    if config.settings.embedding_provider == "openai":
-        model = config.settings.openai_embedding_model
-    else:
-        model = config.settings.ollama_embedding_model
-
+    model = config.settings.embedding_model
     base_name = model.split(":")[0]
     context_tokens = EMBEDDING_MODEL_CONTEXT.get(base_name, DEFAULT_EMBEDDING_CONTEXT)
 
     # Truncate if needed (safety net - embedding_summary should fit)
     text = truncate_text(text, context_tokens)
 
-    # Get embedding
-    if config.settings.embedding_provider == "openai":
-        return await _get_openai_embedding(text)
-    else:
+    # Get embedding based on provider
+    provider = config.settings.embedding_provider
+    if provider == "ollama":
         return await _get_ollama_embedding(text)
+    else:
+        # OpenAI, OpenRouter, and other cloud providers use OpenAI-compatible API
+        return await _get_cloud_embedding(text, provider)
 
 
 async def _get_ollama_embedding(text: str, retries: int = 3) -> list[float]:
@@ -79,7 +75,7 @@ async def _get_ollama_embedding(text: str, retries: int = 3) -> list[float]:
                 response = await client.post(
                     "http://localhost:11434/api/embeddings",
                     json={
-                        "model": config.settings.ollama_embedding_model,
+                        "model": config.settings.embedding_model,
                         "prompt": text,
                     },
                     timeout=60.0,
@@ -106,24 +102,28 @@ async def _get_ollama_embedding(text: str, retries: int = 3) -> list[float]:
     raise last_error  # type: ignore
 
 
-async def _get_openai_embedding(text: str, retries: int = 3) -> list[float]:
-    """Get embedding from OpenAI with retry logic matching Ollama."""
-    api_key = await get_api_key("openai") or config.settings.openai_api_key
+async def _get_cloud_embedding(text: str, provider: str, retries: int = 3) -> list[float]:
+    """Get embedding from cloud provider (OpenAI, OpenRouter, etc.) with retry logic."""
+    from ..config import get_provider_base_url
+    
+    api_key = await get_api_key(provider)
     if not api_key:
-        raise ValueError("OpenAI API key not configured")
+        raise ValueError(f"{provider} API key not configured")
+
+    # Get base URL - use custom if set, otherwise provider default
+    base_url = config.settings.embedding_base_url
+    if not base_url:
+        base_url = get_provider_base_url(provider)
 
     last_error = None
     for attempt in range(retries):
         try:
-            if config.settings.openai_base_url:
-                client = AsyncOpenAI(
-                    base_url=config.settings.openai_base_url,
-                    api_key=api_key,
-                )
-            else:
-                client = AsyncOpenAI(api_key=api_key)
+            client = AsyncOpenAI(
+                base_url=base_url,
+                api_key=api_key,
+            )
             response = await client.embeddings.create(
-                model=config.settings.openai_embedding_model,
+                model=config.settings.embedding_model,
                 input=text,
             )
             return response.data[0].embedding

@@ -7,6 +7,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   checkOllama: () => ipcRenderer.invoke('check-ollama'),
   downloadOllama: () => ipcRenderer.invoke('download-ollama'),
   pullModel: (modelName) => ipcRenderer.invoke('pull-model', modelName),
+  stopOllama: () => ipcRenderer.invoke('stop-ollama'),
   onOllamaDownloadProgress: (callback) => {
     ipcRenderer.on('ollama-download-progress', (_, data) => callback(data));
   },

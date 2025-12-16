@@ -1,4 +1,5 @@
 import threading
+from typing import Literal
 
 from pydantic_settings import BaseSettings
 
@@ -6,6 +7,49 @@ from pydantic_settings import BaseSettings
 # Settings synchronization primitives
 _settings_lock = threading.RLock()
 _settings_version = 0
+
+
+# Supported cloud providers and their default base URLs
+CLOUD_PROVIDERS = {
+    "openai": {
+        "name": "OpenAI",
+        "base_url": "https://api.openai.com/v1",
+        "default_chat_model": "gpt-4o-mini",
+        "default_embedding_model": "text-embedding-3-small",
+        "supports_embeddings": True,
+    },
+    "openrouter": {
+        "name": "OpenRouter",
+        "base_url": "https://openrouter.ai/api/v1",
+        "default_chat_model": "openai/gpt-4o-mini",
+        "default_embedding_model": "openai/text-embedding-3-small",
+        "supports_embeddings": True,
+    },
+    "venice": {
+        "name": "Venice",
+        "base_url": "https://api.venice.ai/api/v1",
+        "default_chat_model": "llama-3.3-70b",
+        "default_embedding_model": "",  # Venice doesn't support embeddings
+        "supports_embeddings": False,
+    },
+    "morpheus": {
+        "name": "Morpheus",
+        "base_url": "https://api.mor.org/api/v1",
+        "default_chat_model": "llama-3.3-70b",
+        "default_embedding_model": "",
+        "supports_embeddings": False,  # Morpheus only has LLM models, no embeddings
+    },
+}
+
+# Provider type for validation
+ProviderType = Literal["ollama", "openai", "openrouter", "venice", "morpheus"]
+
+
+def get_provider_base_url(provider: str) -> str:
+    """Get the default base URL for a provider."""
+    if provider == "ollama":
+        return "http://localhost:11434/v1"
+    return CLOUD_PROVIDERS.get(provider, {}).get("base_url", "")
 
 
 def load_settings_from_db() -> dict:
@@ -32,20 +76,23 @@ def load_settings_from_db() -> dict:
 
 
 class Settings(BaseSettings):
-    # AI Provider: "ollama" or "openai"
-    ai_provider: str = "ollama"
+    # Chat provider: "ollama", "openai", "openrouter", "venice", "morpheus"
+    chat_provider: str = "ollama"
+    chat_model: str = "llama3.2"
+    chat_base_url: str = ""  # Custom override, empty = use provider default
+    
+    # Embedding provider: "ollama", "openai" (most cloud providers don't support embeddings)
+    embedding_provider: str = "ollama"
+    embedding_model: str = "mxbai-embed-large"
+    embedding_base_url: str = ""  # Custom override, empty = use provider default
 
-    # Ollama settings
+    # Legacy fields for backward compatibility
+    ai_provider: str = "ollama"  # Deprecated: use chat_provider
     ollama_base_url: str = "http://localhost:11434/v1"
     ollama_model: str = "llama3.2"
-
-    # OpenAI settings (if using cloud)
     openai_api_key: str = ""  # Deprecated: now stored in DB via secrets service
-    openai_base_url: str = ""  # Custom endpoint for OpenAI-compatible services
+    openai_base_url: str = ""  # Deprecated: use chat_base_url
     openai_model: str = "gpt-4o-mini"
-
-    # Embedding settings
-    embedding_provider: str = "ollama"  # "ollama" or "openai"
     ollama_embedding_model: str = "mxbai-embed-large"
     openai_embedding_model: str = "text-embedding-3-small"
 
@@ -57,15 +104,44 @@ def create_settings() -> Settings:
     """Create settings instance with DB values overlaid."""
     saved = load_settings_from_db()
 
+    # Migration: convert old ai_provider to new chat_provider
+    chat_provider = saved.get("chat_provider")
+    if not chat_provider:
+        # Fall back to legacy ai_provider
+        chat_provider = saved.get("ai_provider", "ollama")
+    
+    # Migration: convert old model settings to new unified format
+    chat_model = saved.get("chat_model")
+    if not chat_model:
+        # Fall back to legacy provider-specific model
+        if chat_provider == "ollama":
+            chat_model = saved.get("ollama_model", "llama3.2")
+        else:
+            chat_model = saved.get("openai_model", "gpt-4o-mini")
+    
+    embedding_provider = saved.get("embedding_provider", "ollama")
+    embedding_model = saved.get("embedding_model")
+    if not embedding_model:
+        # Fall back to legacy provider-specific embedding model
+        if embedding_provider == "ollama":
+            embedding_model = saved.get("ollama_embedding_model", "mxbai-embed-large")
+        else:
+            embedding_model = saved.get("openai_embedding_model", "text-embedding-3-small")
+
     # Construct Settings with DB values, falling back to defaults
-    # Note: We pass values directly to constructor because Pydantic models
-    # may be frozen and not allow attribute assignment after creation
     return Settings(
-        ai_provider=saved.get("ai_provider", "ollama"),
+        # New unified settings
+        chat_provider=chat_provider,
+        chat_model=chat_model,
+        chat_base_url=saved.get("chat_base_url", ""),
+        embedding_provider=embedding_provider,
+        embedding_model=embedding_model,
+        embedding_base_url=saved.get("embedding_base_url", ""),
+        # Legacy fields for backward compatibility
+        ai_provider=chat_provider,
         openai_base_url=saved.get("openai_base_url", ""),
         ollama_model=saved.get("ollama_model", "llama3.2"),
         openai_model=saved.get("openai_model", "gpt-4o-mini"),
-        embedding_provider=saved.get("embedding_provider", "ollama"),
         ollama_embedding_model=saved.get("ollama_embedding_model", "mxbai-embed-large"),
         openai_embedding_model=saved.get("openai_embedding_model", "text-embedding-3-small"),
     )

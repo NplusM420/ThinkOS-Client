@@ -4,18 +4,49 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from .. import config
-from ..config import reload_settings
+from ..config import reload_settings, CLOUD_PROVIDERS, get_provider_base_url
 from ..db.crud import get_setting, set_setting
 from ..models_info import get_context_window
 
 
 router = APIRouter(prefix="/api", tags=["settings"])
 
+# Valid provider types
+ProviderType = Literal["ollama", "openai", "openrouter", "venice", "morpheus"]
+
 
 class SettingsUpdate(BaseModel):
+    """Legacy settings update - kept for backward compatibility."""
     ai_provider: Literal["ollama", "openai"] | None = None
     openai_api_key: str | None = None
     openai_base_url: str | None = None
+
+
+class ChatSettingsUpdate(BaseModel):
+    """Update chat provider settings."""
+    provider: ProviderType
+    model: str
+    base_url: str | None = None  # Custom override, None = use provider default
+    api_key: str | None = None  # Only set if changing the key
+
+
+class EmbeddingSettingsUpdate(BaseModel):
+    """Update embedding provider settings."""
+    provider: Literal["ollama", "openai", "openrouter"]  # Providers that support embeddings
+    model: str
+    base_url: str | None = None
+    api_key: str | None = None
+
+
+class ProviderConfig(BaseModel):
+    """Configuration for a single provider."""
+    id: str
+    name: str
+    base_url: str
+    default_chat_model: str
+    default_embedding_model: str
+    supports_embeddings: bool
+    has_api_key: bool = False
 
 
 class ModelInfo(BaseModel):
@@ -58,17 +89,77 @@ class ProviderStatus(BaseModel):
 
 @router.get("/settings")
 async def get_settings():
-    """Get current AI settings."""
+    """Get current AI settings (legacy + new format)."""
     from ..services.secrets import get_api_key
 
-    api_key = await get_api_key("openai")
+    # Check which providers have API keys configured
+    openai_key = await get_api_key("openai")
+    openrouter_key = await get_api_key("openrouter")
+    venice_key = await get_api_key("venice")
+    morpheus_key = await get_api_key("morpheus")
+
     return {
+        # New unified settings
+        "chat_provider": config.settings.chat_provider,
+        "chat_model": config.settings.chat_model,
+        "chat_base_url": config.settings.chat_base_url,
+        "embedding_provider": config.settings.embedding_provider,
+        "embedding_model": config.settings.embedding_model,
+        "embedding_base_url": config.settings.embedding_base_url,
+        # Provider API key status (masked)
+        "provider_keys": {
+            "openai": bool(openai_key),
+            "openrouter": bool(openrouter_key),
+            "venice": bool(venice_key),
+            "morpheus": bool(morpheus_key),
+        },
+        # Legacy fields for backward compatibility
         "ai_provider": config.settings.ai_provider,
-        "openai_api_key": "***" if api_key else "",
+        "openai_api_key": "***" if openai_key else "",
         "openai_base_url": config.settings.openai_base_url,
         "ollama_model": config.settings.ollama_model,
         "openai_model": config.settings.openai_model,
     }
+
+
+@router.get("/settings/providers")
+async def get_providers():
+    """Get list of available providers with their configurations."""
+    from ..db.core import is_db_initialized
+    
+    providers = []
+    
+    # Add Ollama (local)
+    providers.append(ProviderConfig(
+        id="ollama",
+        name="Ollama (Local)",
+        base_url="http://localhost:11434/v1",
+        default_chat_model="llama3.2",
+        default_embedding_model="mxbai-embed-large",
+        supports_embeddings=True,
+        has_api_key=True,  # Ollama doesn't need a key but we mark as "configured"
+    ))
+    
+    # Add cloud providers
+    for provider_id, provider_config in CLOUD_PROVIDERS.items():
+        # Only check API keys if DB is initialized
+        has_key = False
+        if is_db_initialized():
+            from ..services.secrets import get_api_key
+            api_key = await get_api_key(provider_id)
+            has_key = bool(api_key)
+        
+        providers.append(ProviderConfig(
+            id=provider_id,
+            name=provider_config["name"],
+            base_url=provider_config["base_url"],
+            default_chat_model=provider_config["default_chat_model"],
+            default_embedding_model=provider_config["default_embedding_model"],
+            supports_embeddings=provider_config["supports_embeddings"],
+            has_api_key=has_key,
+        ))
+    
+    return {"providers": providers}
 
 
 @router.post("/settings")
@@ -102,6 +193,80 @@ async def update_settings(update: SettingsUpdate):
     return {"success": True, "settings_version": version}
 
 
+@router.post("/settings/chat")
+async def update_chat_settings(update: ChatSettingsUpdate):
+    """Update chat provider settings."""
+    from ..services.secrets import set_api_key
+
+    # Save chat provider and model
+    await set_setting("chat_provider", update.provider)
+    await set_setting("chat_model", update.model)
+    
+    # Save custom base URL if provided
+    if update.base_url is not None:
+        await set_setting("chat_base_url", update.base_url)
+    
+    # Save API key if provided (for cloud providers)
+    if update.api_key is not None and update.provider != "ollama":
+        await set_api_key(update.provider, update.api_key)
+    
+    # Also update legacy fields for backward compatibility
+    await set_setting("ai_provider", update.provider)
+    if update.provider == "ollama":
+        await set_setting("ollama_model", update.model)
+    else:
+        await set_setting("openai_model", update.model)
+        if update.base_url:
+            await set_setting("openai_base_url", update.base_url)
+
+    version = reload_settings()
+    return {"success": True, "settings_version": version}
+
+
+@router.post("/settings/embedding")
+async def update_embedding_settings(update: EmbeddingSettingsUpdate):
+    """Update embedding provider settings."""
+    from ..services.secrets import set_api_key
+
+    # Save embedding provider and model
+    await set_setting("embedding_provider", update.provider)
+    await set_setting("embedding_model", update.model)
+    
+    # Save custom base URL if provided
+    if update.base_url is not None:
+        await set_setting("embedding_base_url", update.base_url)
+    
+    # Save API key if provided (for cloud providers)
+    if update.api_key is not None and update.provider != "ollama":
+        await set_api_key(update.provider, update.api_key)
+    
+    # Also update legacy fields for backward compatibility
+    if update.provider == "ollama":
+        await set_setting("ollama_embedding_model", update.model)
+    else:
+        await set_setting("openai_embedding_model", update.model)
+
+    version = reload_settings()
+    return {"success": True, "settings_version": version}
+
+
+class ProviderKeyUpdate(BaseModel):
+    provider: str
+    api_key: str
+
+
+@router.post("/settings/provider-key")
+async def update_provider_key(update: ProviderKeyUpdate):
+    """Update API key for a specific provider."""
+    from ..services.secrets import set_api_key
+    
+    if update.provider not in ["openai", "openrouter", "venice", "morpheus"]:
+        raise HTTPException(status_code=400, detail=f"Invalid provider: {update.provider}")
+    
+    await set_api_key(update.provider, update.api_key)
+    return {"success": True}
+
+
 @router.get("/settings/ollama-status")
 async def get_ollama_status() -> OllamaStatus:
     """Check if Ollama is running."""
@@ -121,10 +286,10 @@ async def get_provider_status() -> ProviderStatus:
     """Get current provider status for sidebar indicator."""
     from ..services.secrets import get_api_key
 
-    provider = config.settings.ai_provider
+    provider = config.settings.chat_provider
+    model = config.settings.chat_model
 
     if provider == "ollama":
-        model = config.settings.ollama_model
         try:
             async with httpx.AsyncClient(timeout=2.0) as client:
                 response = await client.get("http://localhost:11434/api/tags")
@@ -144,11 +309,12 @@ async def get_provider_status() -> ProviderStatus:
             status_label="Offline",
         )
     else:
-        model = config.settings.openai_model
-        api_key = await get_api_key("openai")
+        # Cloud provider - check if API key is configured
+        api_key = await get_api_key(provider)
         has_key = bool(api_key)
+        provider_name = CLOUD_PROVIDERS.get(provider, {}).get("name", provider.title())
         return ProviderStatus(
-            provider="openai",
+            provider=provider,
             model=model,
             status="ready" if has_key else "no-key",
             status_label="Ready" if has_key else "No API Key",
@@ -222,7 +388,7 @@ async def get_available_models(provider: str | None = None) -> ModelsResponse:
     from ..services.secrets import get_api_key
 
     # Use query param if provided, otherwise fall back to saved setting
-    effective_provider = provider or config.settings.ai_provider
+    effective_provider = provider or config.settings.chat_provider
 
     if effective_provider == "ollama":
         models = []
@@ -248,36 +414,62 @@ async def get_available_models(provider: str | None = None) -> ModelsResponse:
 
         return ModelsResponse(
             models=models,
-            current_model=config.settings.ollama_model,
+            current_model=config.settings.chat_model,
             provider="ollama",
         )
+    elif effective_provider == "morpheus":
+        # Fetch models from Morpheus API (no auth required for model list)
+        models = []
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                response = await client.get("https://api.mor.org/api/v1/models")
+                if response.status_code == 200:
+                    data = response.json()
+                    for m in data.get("data", []):
+                        model_id = m.get("id", "")
+                        model_type = m.get("modelType", "")
+                        # Only include LLM models for chat
+                        if model_type == "LLM" and model_id:
+                            models.append(ModelInfo(
+                                name=model_id,
+                                is_downloaded=True,
+                                context_window=8192,  # Default context window
+                            ))
+        except Exception as e:
+            print(f"Error fetching Morpheus models: {e}")
+
+        return ModelsResponse(
+            models=models,
+            current_model=config.settings.chat_model,
+            provider="morpheus",
+        )
     else:
-        # OpenAI - try to fetch from API, fall back to common models
-        api_key = await get_api_key("openai")
+        # OpenAI and other providers - try to fetch from API, fall back to common models
+        api_key = await get_api_key(effective_provider)
         models = []
 
         if api_key:
             try:
                 async with httpx.AsyncClient(timeout=5.0) as client:
                     headers = {"Authorization": f"Bearer {api_key}"}
-                    base_url = config.settings.openai_base_url or "https://api.openai.com/v1"
+                    provider_config = CLOUD_PROVIDERS.get(effective_provider, {})
+                    base_url = provider_config.get("base_url", "https://api.openai.com/v1")
                     response = await client.get(f"{base_url}/models", headers=headers)
                     if response.status_code == 200:
                         data = response.json()
                         for m in data.get("data", []):
-                            model_id = m["id"]
-                            # Filter to chat models
-                            if any(prefix in model_id for prefix in ["gpt-4", "gpt-3.5"]):
+                            model_id = m.get("id", "")
+                            if model_id:
                                 models.append(ModelInfo(
                                     name=model_id,
                                     is_downloaded=True,
                                     context_window=get_context_window(model_id),
                                 ))
             except Exception as e:
-                print(f"Error fetching OpenAI models: {e}")
+                print(f"Error fetching {effective_provider} models: {e}")
 
         # Fallback to common models if API call failed or returned empty
-        if not models:
+        if not models and effective_provider == "openai":
             models = [
                 ModelInfo(
                     name=m,
@@ -289,8 +481,8 @@ async def get_available_models(provider: str | None = None) -> ModelsResponse:
 
         return ModelsResponse(
             models=models,
-            current_model=config.settings.openai_model,
-            provider="openai",
+            current_model=config.settings.chat_model,
+            provider=effective_provider,
         )
 
 

@@ -85,6 +85,39 @@ async function ensureOllamaRunning() {
   }
 }
 
+/**
+ * Stop Ollama if running
+ */
+async function stopOllama() {
+  const platform = process.platform;
+  
+  try {
+    if (platform === 'win32') {
+      // On Windows, kill the ollama process
+      execSync('taskkill /F /IM ollama.exe /T', { stdio: 'ignore' });
+      console.log('Ollama stopped on Windows');
+    } else if (platform === 'darwin') {
+      // On macOS, quit the Ollama app gracefully first, then force kill if needed
+      try {
+        execSync('osascript -e \'quit app "Ollama"\'', { stdio: 'ignore' });
+      } catch {
+        // If graceful quit fails, force kill
+        execSync('pkill -f ollama', { stdio: 'ignore' });
+      }
+      console.log('Ollama stopped on macOS');
+    } else {
+      // On Linux, kill the ollama process
+      execSync('pkill -f ollama', { stdio: 'ignore' });
+      console.log('Ollama stopped on Linux');
+    }
+    return { success: true };
+  } catch (error) {
+    // Process might not be running, which is fine
+    console.log('Ollama stop attempt:', error.message);
+    return { success: true, message: 'Ollama may not have been running' };
+  }
+}
+
 function getBackendPath() {
   if (app.isPackaged) {
     // Production: bundled backend executable (inside onedir folder)
@@ -377,4 +410,8 @@ ipcMain.handle('pull-model', async (_event, modelName) => {
     console.error('Model pull error:', error);
     return { success: false, error: error.message };
   }
+});
+
+ipcMain.handle('stop-ollama', async () => {
+  return await stopOllama();
 });

@@ -15,6 +15,7 @@ declare global {
       checkOllama: () => Promise<{ installed: boolean; running: boolean }>;
       downloadOllama: () => Promise<{ success: boolean; error?: string }>;
       pullModel: (model: string) => Promise<{ success: boolean; error?: string }>;
+      stopOllama: () => Promise<{ success: boolean; message?: string }>;
       onOllamaDownloadProgress: (callback: (data: { progress: number; stage: string }) => void) => void;
       onModelPullProgress: (callback: (data: { progress?: number; status: string }) => void) => void;
       removeOllamaDownloadProgress: () => void;

@@ -14,27 +14,33 @@ Keep responses conversational and concise. Be helpful and warm, like a knowledge
 async def get_client() -> AsyncOpenAI:
     """Get configured OpenAI client (works with Ollama and OpenAI-compatible services)."""
     from .secrets import get_api_key
+    from ..config import CLOUD_PROVIDERS, get_provider_base_url
 
-    if config.settings.ai_provider == "ollama":
+    provider = config.settings.chat_provider
+    
+    if provider == "ollama":
         return AsyncOpenAI(
             base_url=config.settings.ollama_base_url,
             api_key="ollama",  # Ollama doesn't need a real key
         )
     else:
-        api_key = await get_api_key("openai") or ""
-        if config.settings.openai_base_url:
-            return AsyncOpenAI(
-                base_url=config.settings.openai_base_url,
-                api_key=api_key,
-            )
-        return AsyncOpenAI(api_key=api_key)
+        # Get API key for the specific provider
+        api_key = await get_api_key(provider) or ""
+        
+        # Get base URL - use custom if set, otherwise provider default
+        base_url = config.settings.chat_base_url
+        if not base_url:
+            base_url = get_provider_base_url(provider)
+        
+        return AsyncOpenAI(
+            base_url=base_url,
+            api_key=api_key,
+        )
 
 
 def get_model() -> str:
     """Get the model name based on provider."""
-    if config.settings.ai_provider == "ollama":
-        return config.settings.ollama_model
-    return config.settings.openai_model
+    return config.settings.chat_model
 
 
 def build_messages(

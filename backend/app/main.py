@@ -61,7 +61,15 @@ app.add_middleware(
 )
 
 # Paths that don't require unlock
-PUBLIC_PATHS = {"/health", "/api/auth/status", "/api/auth/setup", "/api/auth/unlock"}
+PUBLIC_PATHS = {
+    "/health",
+    "/api/auth/status",
+    "/api/auth/setup",
+    "/api/auth/unlock",
+    "/api/settings/providers",  # Static provider config doesn't need DB
+    "/api/settings/ollama-status",  # Ollama status check doesn't need DB
+    "/api/settings/models",  # Model lists can be fetched without DB (for Morpheus/Ollama)
+}
 
 
 @app.middleware("http")
