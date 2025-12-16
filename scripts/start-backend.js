@@ -14,7 +14,7 @@ console.log(`[start-backend] Starting backend server...`);
 console.log(`[start-backend] Working directory: ${backendDir}`);
 
 const child = spawn(
-  isWindows ? 'poetry.cmd' : 'poetry',
+  'poetry',
   ['run', 'uvicorn', 'app.main:app', '--reload', '--port', '8765'],
   { 
     cwd: backendDir, 

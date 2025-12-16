@@ -201,9 +201,25 @@ def migration_007(conn: Connection) -> None:
         """))
 
 
+def _has_fts5_support(conn: Connection) -> bool:
+    """Check if FTS5 module is available in this SQLite build."""
+    try:
+        conn.execute(text("CREATE VIRTUAL TABLE _fts5_test USING fts5(test)"))
+        conn.execute(text("DROP TABLE _fts5_test"))
+        return True
+    except Exception:
+        return False
+
+
 @migration(8, "Add FTS5 full-text search for memories")
 def migration_008(conn: Connection) -> None:
     """Create FTS5 virtual table for hybrid search."""
+    # Check if FTS5 is available (not all SQLite builds include it)
+    if not _has_fts5_support(conn):
+        print("Warning: FTS5 not available in this SQLite build. Skipping FTS migration.")
+        print("Full-text search will use fallback LIKE queries instead.")
+        return
+
     result = conn.execute(text(
         "SELECT name FROM sqlite_master WHERE type='table' AND name='memories_fts'"
     )).fetchone()
