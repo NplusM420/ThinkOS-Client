@@ -3,29 +3,31 @@ import sys
 import os
 from pathlib import Path
 
-# Find sqlite-vec dylib
+# Find sqlite-vec extension (platform-specific)
 import sqlite_vec
 sqlite_vec_dir = Path(sqlite_vec.__file__).parent
-if sys.platform == 'win32':
+if sys.platform == 'darwin':
+    sqlite_vec_ext = sqlite_vec_dir / 'vec0.dylib'
+elif sys.platform == 'win32':
     sqlite_vec_ext = sqlite_vec_dir / 'vec0.dll'
 else:
-    sqlite_vec_ext = sqlite_vec_dir / 'vec0.dylib'
+    sqlite_vec_ext = sqlite_vec_dir / 'vec0.so'
 
-# Detect platform for SQLCipher library
+# SQLCipher library - only needed on macOS/Linux
+# Note: rotki-pysqlcipher3 bundles SQLCipher statically on Windows
+sqlcipher_lib = None
 if sys.platform == 'darwin':
     # macOS - Homebrew path
     sqlcipher_lib = '/opt/homebrew/lib/libsqlcipher.0.dylib'
     if not os.path.exists(sqlcipher_lib):
         sqlcipher_lib = '/usr/local/lib/libsqlcipher.0.dylib'
-elif sys.platform == 'win32':
-    # Windows - adjust path as needed
-    sqlcipher_lib = 'C:/sqlcipher/sqlcipher.dll'
-else:
+elif sys.platform == 'linux':
     # Linux
     sqlcipher_lib = '/usr/lib/libsqlcipher.so.0'
+# Windows: rotki-pysqlcipher3 has SQLCipher statically linked, no external DLL needed
 
 binaries = []
-if os.path.exists(sqlcipher_lib):
+if sqlcipher_lib and os.path.exists(sqlcipher_lib):
     binaries.append((sqlcipher_lib, '.'))
 if sqlite_vec_ext.exists():
     binaries.append((str(sqlite_vec_ext), 'sqlite_vec'))
@@ -96,4 +98,3 @@ coll = COLLECT(
 # Note: Native messaging stub is now compiled as pure C via 'pnpm build:stub'
 # This eliminates the Python.framework dependency that caused Gatekeeper issues on macOS
 # See: backend/native_host/stub.c
-

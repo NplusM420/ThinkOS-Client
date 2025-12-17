@@ -11,6 +11,7 @@
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const { execSync } = require('child_process');
 
 // Extension IDs - update these when publishing to browser stores
 // During development, Chrome assigns a dynamic ID based on the extension path
@@ -128,93 +129,40 @@ function installManifest(directory, manifest) {
 }
 
 /**
- * Install Windows registry using reg.exe (no external dependencies).
- */
-function installWindowsRegistryWithReg(manifestPath, regPath, browserName) {
-  const { execSync } = require('child_process');
-  try {
-    // Create the registry key and set the default value to the manifest path
-    execSync(`reg add "${regPath}" /ve /t REG_SZ /d "${manifestPath}" /f`, { 
-      stdio: 'pipe',
-      windowsHide: true 
-    });
-    console.log(`[Native Host] Installed registry entry for ${browserName}`);
-    return true;
-  } catch (error) {
-    console.error(`[Native Host] Failed to set registry for ${browserName}:`, error.message);
-    return false;
-  }
-}
-
-/**
- * Install Windows registry entries.
- * Uses reg.exe as primary method (no dependencies), falls back to winreg if available.
+ * Install Windows registry entries using reg.exe (no external dependencies).
  */
 function installWindowsRegistry(stubPath, extensionIds) {
-  // Create manifest file in app directory
+  // Windows requires registry entries that point to manifest files
   const manifestDir = path.dirname(stubPath);
-  const chromeManifestPath = path.join(manifestDir, `${NATIVE_HOST_NAME}.json`);
-  const firefoxManifestPath = path.join(manifestDir, `${NATIVE_HOST_NAME}.firefox.json`);
 
-  // Write Chrome/Edge manifest
+  // Chrome/Edge manifest
+  const chromeManifestPath = path.join(manifestDir, `${NATIVE_HOST_NAME}.json`);
   const chromeManifest = createChromeManifest(stubPath, extensionIds);
   fs.writeFileSync(chromeManifestPath, JSON.stringify(chromeManifest, null, 2));
   console.log(`[Native Host] Created manifest: ${chromeManifestPath}`);
 
-  // Write Firefox manifest
+  // Firefox manifest
+  const firefoxManifestPath = path.join(manifestDir, `${NATIVE_HOST_NAME}.firefox.json`);
   const firefoxManifest = createFirefoxManifest(stubPath);
   fs.writeFileSync(firefoxManifestPath, JSON.stringify(firefoxManifest, null, 2));
   console.log(`[Native Host] Created manifest: ${firefoxManifestPath}`);
 
-  // Registry paths
-  const registryEntries = [
-    { name: 'Chrome', path: `HKCU\\Software\\Google\\Chrome\\NativeMessagingHosts\\${NATIVE_HOST_NAME}`, manifest: chromeManifestPath },
-    { name: 'Edge', path: `HKCU\\Software\\Microsoft\\Edge\\NativeMessagingHosts\\${NATIVE_HOST_NAME}`, manifest: chromeManifestPath },
-    { name: 'Firefox', path: `HKCU\\Software\\Mozilla\\NativeMessagingHosts\\${NATIVE_HOST_NAME}`, manifest: firefoxManifestPath },
+  const browsers = [
+    { name: 'Chrome', key: `HKCU\\Software\\Google\\Chrome\\NativeMessagingHosts\\${NATIVE_HOST_NAME}`, manifest: chromeManifestPath },
+    { name: 'Edge', key: `HKCU\\Software\\Microsoft\\Edge\\NativeMessagingHosts\\${NATIVE_HOST_NAME}`, manifest: chromeManifestPath },
+    { name: 'Firefox', key: `HKCU\\Software\\Mozilla\\NativeMessagingHosts\\${NATIVE_HOST_NAME}`, manifest: firefoxManifestPath },
   ];
 
-  // Try using reg.exe first (no dependencies required)
-  let useRegExe = true;
-  try {
-    require('child_process').execSync('reg query HKCU /? >nul 2>&1', { stdio: 'pipe', windowsHide: true });
-  } catch (e) {
-    useRegExe = false;
-  }
-
-  if (useRegExe) {
-    console.log('[Native Host] Using reg.exe for registry installation...');
-    for (const entry of registryEntries) {
-      installWindowsRegistryWithReg(entry.manifest, entry.path, entry.name);
-    }
-    return;
-  }
-
-  // Fallback to winreg module if reg.exe is not available
-  let Registry;
-  try {
-    Registry = require('winreg');
-  } catch (e) {
-    console.error('[Native Host] Neither reg.exe nor winreg module available.');
-    console.error('[Native Host] Registry installation failed.');
-    return;
-  }
-
-  console.log('[Native Host] Using winreg module for registry installation...');
-  for (const entry of registryEntries) {
+  for (const browser of browsers) {
     try {
-      const regKey = new Registry({
-        hive: Registry.HKCU,
-        key: entry.path.replace('HKCU\\', '\\'),
+      // Use reg.exe to add registry key (no external dependencies needed)
+      execSync(`reg add "${browser.key}" /ve /t REG_SZ /d "${browser.manifest}" /f`, {
+        stdio: 'pipe',
+        windowsHide: true,
       });
-      regKey.set('', Registry.REG_SZ, entry.manifest, (err) => {
-        if (err) {
-          console.error(`[Native Host] Failed to set registry for ${entry.name}:`, err);
-        } else {
-          console.log(`[Native Host] Installed registry entry for ${entry.name}`);
-        }
-      });
+      console.log(`[Native Host] Installed registry entry for ${browser.name}`);
     } catch (error) {
-      console.error(`[Native Host] Failed to install registry for ${entry.name}:`, error.message);
+      console.error(`[Native Host] Failed to install registry for ${browser.name}:`, error.message);
     }
   }
 }
@@ -291,31 +239,26 @@ function installNativeHost(resourcesPath, extensionIds = CHROME_EXTENSION_IDS, i
 
 /**
  * Uninstall native messaging host manifests.
- * @param {string} resourcesPath - Path to Electron app resources directory
  */
-function uninstallNativeHost(resourcesPath) {
+function uninstallNativeHost() {
   console.log('[Native Host] Uninstalling native messaging host manifests...');
 
   if (process.platform === 'win32') {
-    // Remove Windows registry entries
-    const Registry = require('winreg');
-
+    // Remove Windows registry entries using reg.exe
     const keys = [
-      '\\Software\\Google\\Chrome\\NativeMessagingHosts\\' + NATIVE_HOST_NAME,
-      '\\Software\\Microsoft\\Edge\\NativeMessagingHosts\\' + NATIVE_HOST_NAME,
-      '\\Software\\Mozilla\\NativeMessagingHosts\\' + NATIVE_HOST_NAME,
+      `HKCU\\Software\\Google\\Chrome\\NativeMessagingHosts\\${NATIVE_HOST_NAME}`,
+      `HKCU\\Software\\Microsoft\\Edge\\NativeMessagingHosts\\${NATIVE_HOST_NAME}`,
+      `HKCU\\Software\\Mozilla\\NativeMessagingHosts\\${NATIVE_HOST_NAME}`,
     ];
 
     for (const key of keys) {
       try {
-        const regKey = new Registry({ hive: Registry.HKCU, key });
-        regKey.destroy((err) => {
-          if (err && err.code !== 2) { // Ignore "key not found" errors
-            console.error(`[Native Host] Failed to remove registry key ${key}:`, err);
-          }
+        execSync(`reg delete "${key}" /f`, {
+          stdio: 'pipe',
+          windowsHide: true,
         });
       } catch (error) {
-        // Ignore errors
+        // Ignore errors (key might not exist)
       }
     }
 

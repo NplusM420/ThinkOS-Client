@@ -1,89 +1,90 @@
 #!/usr/bin/env node
 /**
  * Cross-platform native messaging stub build script.
- * 
- * - Windows: Uses PyInstaller to build from stub_win.py
- * - macOS/Linux: Uses clang to compile stub.c
+ * - macOS/Linux: Compiles C stub with clang/gcc
+ * - Windows: Builds Python stub with PyInstaller
  */
 
 const { execSync } = require('child_process');
+const os = require('os');
 const path = require('path');
 const fs = require('fs');
 
-const isWindows = process.platform === 'win32';
-const isMac = process.platform === 'darwin';
-const backendDir = path.join(__dirname, '..', 'backend');
-const nativeHostDir = path.join(backendDir, 'native_host');
+const platform = os.platform();
+const nativeHostDir = path.join(__dirname, '..', 'backend', 'native_host');
 
-console.log(`[build-stub] Platform: ${process.platform}`);
-console.log(`[build-stub] Backend dir: ${backendDir}`);
+console.log(`Building native stub for ${platform}...`);
 
-if (isWindows) {
-  console.log('[build-stub] Building Windows native stub with PyInstaller...');
-  
+if (platform === 'win32') {
+  // Windows: Build Python stub with PyInstaller
+  console.log('Building Python stub with PyInstaller...');
   try {
-    execSync(
-      'poetry run pyinstaller --onefile --name think-native-stub --distpath native_host native_host/stub_win.py --noconfirm',
-      { cwd: backendDir, stdio: 'inherit' }
-    );
-    
-    const exePath = path.join(nativeHostDir, 'think-native-stub.exe');
-    if (fs.existsSync(exePath)) {
-      console.log(`[build-stub] Success! Built: ${exePath}`);
-    } else {
-      console.error('[build-stub] Build completed but exe not found');
-      process.exit(1);
+    execSync('poetry run pyinstaller stub_win.spec --clean', {
+      cwd: nativeHostDir,
+      stdio: 'inherit',
+      shell: true,
+    });
+
+    // Move the built exe to the native_host directory for bundling
+    const distExe = path.join(nativeHostDir, 'dist', 'think-native-stub.exe');
+    const targetExe = path.join(nativeHostDir, 'think-native-stub.exe');
+    if (fs.existsSync(distExe)) {
+      fs.copyFileSync(distExe, targetExe);
+      console.log(`Copied stub to ${targetExe}`);
     }
   } catch (error) {
-    console.error('[build-stub] PyInstaller build failed:', error.message);
+    console.error('PyInstaller failed:', error.message);
     process.exit(1);
   }
 } else {
-  console.log('[build-stub] Building macOS/Linux native stub with clang...');
-  
+  // macOS/Linux: Compile C stub
+  const compiler = platform === 'darwin' ? 'clang' : 'gcc';
+  const stubSource = path.join(nativeHostDir, 'stub.c');
+  const stubOutput = path.join(nativeHostDir, 'think-native-stub');
+
+  console.log(`Compiling C stub with ${compiler}...`);
   try {
-    execSync('clang -O2 -o think-native-stub stub.c', { 
-      cwd: nativeHostDir, 
-      stdio: 'inherit' 
+    execSync(`${compiler} -O2 -o think-native-stub stub.c`, {
+      cwd: nativeHostDir,
+      stdio: 'inherit',
     });
-    
-    const stubPath = path.join(nativeHostDir, 'think-native-stub');
-    
-    if (isMac) {
-      // Code signing for macOS
-      const codesignIdentity = process.env.CODESIGN_IDENTITY || 
-        (() => {
-          try {
-            const envLocal = path.join(__dirname, '..', '.env.local');
-            if (fs.existsSync(envLocal)) {
-              const content = fs.readFileSync(envLocal, 'utf8');
-              const match = content.match(/^CODESIGN_IDENTITY=(.+)$/m);
-              return match ? match[1].trim() : null;
-            }
-          } catch (e) {}
-          return null;
-        })();
-      
-      if (codesignIdentity) {
-        console.log(`[build-stub] Signing with identity: ${codesignIdentity}`);
+  } catch (error) {
+    console.error('Compilation failed:', error.message);
+    process.exit(1);
+  }
+
+  // Code signing on macOS
+  if (platform === 'darwin') {
+    const codesignIdentity = process.env.CODESIGN_IDENTITY;
+
+    if (codesignIdentity) {
+      console.log('Signing stub binary...');
+      try {
         execSync(
           `codesign --force --sign "${codesignIdentity}" --timestamp --options runtime think-native-stub`,
-          { cwd: nativeHostDir, stdio: 'inherit' }
+          {
+            cwd: nativeHostDir,
+            stdio: 'inherit',
+          }
         );
-      } else {
-        console.log('[build-stub] No CODESIGN_IDENTITY found, using ad-hoc signing');
-        execSync('codesign --sign - --force think-native-stub', { 
-          cwd: nativeHostDir, 
-          stdio: 'inherit' 
+        console.log('Code signing complete.');
+      } catch (error) {
+        console.error('Code signing failed:', error.message);
+        process.exit(1);
+      }
+    } else {
+      // Ad-hoc signing for local development
+      console.log('Ad-hoc signing for local development...');
+      try {
+        execSync('codesign --sign - --force think-native-stub', {
+          cwd: nativeHostDir,
+          stdio: 'inherit',
         });
+      } catch (error) {
+        console.warn('Ad-hoc signing failed (non-fatal):', error.message);
       }
     }
-    
-    console.log(`[build-stub] Success! Built: ${stubPath}`);
-  } catch (error) {
-    console.error('[build-stub] Build failed:', error.message);
-    process.exit(1);
   }
 }
 
-console.log('[build-stub] Done!');
+console.log('Native stub build complete!');
