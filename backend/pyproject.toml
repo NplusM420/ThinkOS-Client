@@ -20,6 +20,10 @@ sqlite-vec = "^0.1.0"
 numpy = "^2.0.0"
 # Windows-only: pywin32 for native messaging stub
 pywin32 = {version = "^306", markers = "sys_platform == 'win32'"}
+python-multipart = "^0.0.21"
+cryptography = "^46.0.3"
+# Browser automation for web research
+playwright = "^1.49.0"
 
 [tool.poetry.group.dev.dependencies]
 pyinstaller = "^6.0.0"

@@ -36,12 +36,63 @@ logging.getLogger("uvicorn.access").addFilter(EndpointFilter())
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Ensure Playwright browsers are installed (for web research)
+    await ensure_playwright_installed()
+    
+    # Register built-in tools
+    from .tools import register_all_builtin_tools
+    register_all_builtin_tools()
+    
     # Start native messaging socket server for secure extension communication
     from .native_messaging import start_native_messaging_server, stop_native_messaging_server
 
     await start_native_messaging_server()
     yield
     await stop_native_messaging_server()
+
+
+async def ensure_playwright_installed():
+    """Ensure Playwright browsers are installed for web research."""
+    import asyncio
+    import subprocess
+    import sys
+    
+    logger = logging.getLogger(__name__)
+    
+    try:
+        # Check if Playwright is installed and browsers are available
+        from playwright.async_api import async_playwright
+        
+        # Try to launch browser to verify it's installed
+        async with async_playwright() as p:
+            try:
+                browser = await p.chromium.launch(headless=True)
+                await browser.close()
+                logger.info("Playwright browsers already installed")
+                return
+            except Exception:
+                # Browser not installed, need to install
+                pass
+        
+        logger.info("Installing Playwright browsers (first-time setup)...")
+        
+        # Run playwright install chromium
+        result = subprocess.run(
+            [sys.executable, "-m", "playwright", "install", "chromium"],
+            capture_output=True,
+            text=True,
+            timeout=300  # 5 minute timeout
+        )
+        
+        if result.returncode == 0:
+            logger.info("Playwright browsers installed successfully")
+        else:
+            logger.warning(f"Playwright install warning: {result.stderr}")
+            
+    except ImportError:
+        logger.warning("Playwright not installed - web research will be unavailable")
+    except Exception as e:
+        logger.warning(f"Playwright setup failed: {e} - web research may be unavailable")
 
 
 app = FastAPI(title="Think API", lifespan=lifespan)

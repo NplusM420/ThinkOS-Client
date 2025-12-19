@@ -47,3 +47,6 @@ backend/native_host/com.think.native.firefox.json
 # PyInstaller
 backend/build/
 backend/*.spec
+
+.ai
+.ai/

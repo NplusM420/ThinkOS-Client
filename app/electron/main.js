@@ -1,4 +1,5 @@
-const { app, BrowserWindow, ipcMain } = require('electron');
+const { app, BrowserWindow, ipcMain, Menu } = require('electron');
+const { autoUpdater } = require('electron-updater');
 const { spawn, execSync } = require('child_process');
 const crypto = require('crypto');
 const path = require('path');
@@ -16,8 +17,8 @@ function downloadFile(url, destPath, onProgress) {
 
     const makeRequest = (urlString) => {
       https.get(urlString, (response) => {
-        // Handle redirects
-        if (response.statusCode === 301 || response.statusCode === 302) {
+        // Handle redirects (301, 302, 307, 308)
+        if ([301, 302, 307, 308].includes(response.statusCode)) {
           makeRequest(response.headers.location);
           return;
         }
@@ -70,6 +71,25 @@ const APP_TOKEN = crypto.randomBytes(32).toString('hex');
 const HEALTH_CHECK_URL = 'http://localhost:8765/health';
 const HEALTH_CHECK_INTERVAL_MS = 200;
 const HEALTH_CHECK_TIMEOUT_MS = 30000;
+
+// Configure auto-updater
+autoUpdater.autoDownload = true;
+autoUpdater.autoInstallOnAppQuit = true;
+
+autoUpdater.on('update-available', (info) => {
+  console.log('Update available:', info.version);
+});
+
+autoUpdater.on('update-downloaded', (info) => {
+  console.log('Update downloaded:', info.version);
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('update-downloaded', info.version);
+  }
+});
+
+autoUpdater.on('error', (err) => {
+  console.error('Auto-updater error:', err);
+});
 
 /**
  * Polls the backend health endpoint until it responds successfully.
@@ -131,6 +151,18 @@ async function ensureOllamaRunning() {
   } else if (platform === 'win32') {
     const ollamaPath = path.join(process.env.LOCALAPPDATA, 'Programs', 'Ollama', 'ollama.exe');
     if (fs.existsSync(ollamaPath)) {
+      console.log('Starting Ollama...');
+      spawn(ollamaPath, ['serve'], { detached: true, stdio: 'ignore' });
+    }
+  } else if (platform === 'linux') {
+    // Linux: Check common installation paths
+    const ollamaPaths = [
+      '/usr/local/bin/ollama',
+      '/usr/bin/ollama',
+      path.join(process.env.HOME || '', '.local/bin/ollama'),
+    ];
+    const ollamaPath = ollamaPaths.find(p => fs.existsSync(p));
+    if (ollamaPath) {
       console.log('Starting Ollama...');
       spawn(ollamaPath, ['serve'], { detached: true, stdio: 'ignore' });
     }
@@ -224,6 +256,80 @@ function startPythonBackend() {
   });
 }
 
+function createMenu() {
+  const isMac = process.platform === 'darwin';
+
+  const template = [
+    ...(isMac ? [{
+      label: app.name,
+      submenu: [
+        { role: 'about' },
+        { type: 'separator' },
+        {
+          label: 'Check for Updates...',
+          click: () => autoUpdater.checkForUpdates()
+        },
+        { type: 'separator' },
+        { role: 'services' },
+        { type: 'separator' },
+        { role: 'hide' },
+        { role: 'hideOthers' },
+        { role: 'unhide' },
+        { type: 'separator' },
+        { role: 'quit' }
+      ]
+    }] : []),
+    {
+      label: 'Edit',
+      submenu: [
+        { role: 'undo' },
+        { role: 'redo' },
+        { type: 'separator' },
+        { role: 'cut' },
+        { role: 'copy' },
+        { role: 'paste' },
+        { role: 'selectAll' }
+      ]
+    },
+    {
+      label: 'View',
+      submenu: [
+        { role: 'reload' },
+        { role: 'forceReload' },
+        { role: 'toggleDevTools' },
+        { type: 'separator' },
+        { role: 'resetZoom' },
+        { role: 'zoomIn' },
+        { role: 'zoomOut' },
+        { type: 'separator' },
+        { role: 'togglefullscreen' }
+      ]
+    },
+    {
+      label: 'Window',
+      submenu: [
+        { role: 'minimize' },
+        { role: 'zoom' },
+        ...(isMac ? [
+          { type: 'separator' },
+          { role: 'front' }
+        ] : [
+          { role: 'close' }
+        ])
+      ]
+    },
+    ...(!isMac ? [{
+      label: 'Help',
+      submenu: [{
+        label: 'Check for Updates...',
+        click: () => autoUpdater.checkForUpdates()
+      }]
+    }] : [])
+  ];
+
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+}
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1200,
@@ -270,6 +376,14 @@ app.whenReady().then(async () => {
   const isDev = !app.isPackaged;
   installNativeHost(resourcesPath, undefined, isDev);
 
+  // Set up application menu
+  createMenu();
+
+  // Check for updates (only in production)
+  if (app.isPackaged) {
+    autoUpdater.checkForUpdatesAndNotify();
+  }
+
   // Start Ollama if installed (don't wait, let it start in background)
   ensureOllamaRunning();
 
@@ -292,17 +406,64 @@ app.whenReady().then(async () => {
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
-    // On non-macOS, quit the app (before-quit will kill backend)
+    // On non-macOS, cleanup backend and quit
+    cleanupBackend();
     app.quit();
   }
   // On macOS, keep backend running so reopening via dock works
 });
 
 app.on('before-quit', () => {
-  if (pythonProcess) {
-    pythonProcess.kill();
-  }
+  cleanupBackend();
 });
+
+/**
+ * Properly cleanup the backend process and any child processes.
+ * On Windows with shell: true, we need to kill the process tree.
+ */
+function cleanupBackend() {
+  if (!pythonProcess) return;
+  
+  console.log('Cleaning up backend process...');
+  
+  try {
+    if (process.platform === 'win32') {
+      // On Windows, kill the entire process tree using taskkill
+      // pythonProcess.pid is the shell process, we need to kill its children too
+      try {
+        execSync(`taskkill /F /T /PID ${pythonProcess.pid}`, { stdio: 'ignore' });
+        console.log('Backend process tree killed via taskkill');
+      } catch (e) {
+        // Process might already be dead
+        console.log('taskkill result:', e.message);
+      }
+      
+      // Also kill any orphaned uvicorn/python processes on port 8765
+      try {
+        execSync('for /f "tokens=5" %a in (\'netstat -ano ^| findstr :8765 ^| findstr LISTENING\') do taskkill /F /PID %a', { 
+          shell: 'cmd.exe',
+          stdio: 'ignore' 
+        });
+      } catch (e) {
+        // No process on port, that's fine
+      }
+    } else {
+      // On Unix, send SIGTERM then SIGKILL if needed
+      pythonProcess.kill('SIGTERM');
+      setTimeout(() => {
+        try {
+          pythonProcess.kill('SIGKILL');
+        } catch (e) {
+          // Process already dead
+        }
+      }, 1000);
+    }
+  } catch (err) {
+    console.error('Error cleaning up backend:', err);
+  }
+  
+  pythonProcess = null;
+}
 
 app.on('activate', () => {
   if (BrowserWindow.getAllWindows().length === 0) {
@@ -473,4 +634,8 @@ ipcMain.handle('pull-model', async (_event, modelName) => {
 
 ipcMain.handle('stop-ollama', async () => {
   return await stopOllama();
+});
+
+ipcMain.handle('install-update', () => {
+  autoUpdater.quitAndInstall();
 });

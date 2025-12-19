@@ -4,11 +4,14 @@ import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
-import { Check, Circle, Loader2, Monitor, Sun, Moon, AlertTriangle } from "lucide-react";
+import { Check, Circle, Loader2, Monitor, Sun, Moon, AlertTriangle, LogOut } from "lucide-react";
 import { Theme, setTheme, getTheme } from "@/hooks/useSystemTheme";
 import { apiFetch } from "@/lib/api";
 import { ModelSelector } from "@/components/ModelSelector";
 import { ProviderSettings } from "@/components/ProviderSettings";
+import { BrowserUseSettings } from "@/components/BrowserUseSettings";
+import { VoiceSettingsPanel } from "@/components/voice";
+import { PluginBrowser } from "@/components/plugins";
 import { useReembedJob } from "@/hooks/useReembedJob";
 
 interface Settings {
@@ -67,6 +70,10 @@ export default function SettingsPage({ onNameChange }: SettingsPageProps) {
   // Stale embeddings state (for manual re-embed button)
   const [staleEmbeddingsCount, setStaleEmbeddingsCount] = useState(0);
   const [showReembedDialog, setShowReembedDialog] = useState(false);
+
+  // Lock app state
+  const [showLockDialog, setShowLockDialog] = useState(false);
+  const [locking, setLocking] = useState(false);
 
   // Use the reembed job hook for background re-embedding
   const reembedJob = useReembedJob({
@@ -213,6 +220,20 @@ export default function SettingsPage({ onNameChange }: SettingsPageProps) {
       console.error("Failed to save profile:", err);
     } finally {
       setSavingProfile(false);
+    }
+  };
+
+  const handleLock = async () => {
+    setLocking(true);
+    try {
+      const res = await apiFetch("/api/auth/logout", { method: "POST" });
+      if (res.ok) {
+        window.location.reload();
+      }
+    } catch (err) {
+      console.error("Failed to lock:", err);
+    } finally {
+      setLocking(false);
     }
   };
 
@@ -395,6 +416,56 @@ export default function SettingsPage({ onNameChange }: SettingsPageProps) {
             <ProviderSettings />
           </CardContent>
         </Card>
+
+        {/* Browser Automation Section */}
+        <Card className="mb-6">
+          <CardHeader>
+            <CardTitle className="text-base">Browser Automation</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <BrowserUseSettings />
+          </CardContent>
+        </Card>
+
+        {/* Voice Settings Section */}
+        <Card className="mb-6">
+          <CardHeader>
+            <CardTitle className="text-base">Voice (TTS & STT)</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <VoiceSettingsPanel />
+          </CardContent>
+        </Card>
+
+        {/* Plugins Section */}
+        <Card className="mb-6">
+          <CardHeader>
+            <CardTitle className="text-base">Plugins</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <PluginBrowser />
+          </CardContent>
+        </Card>
+
+        {/* Security Section */}
+        <Card className="mb-6">
+          <CardHeader>
+            <CardTitle className="text-base">Security</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <Button
+              variant="outline"
+              onClick={() => setShowLockDialog(true)}
+              className="w-full"
+            >
+              <LogOut className="h-4 w-4 mr-2" />
+              Lock App
+            </Button>
+            <p className="text-xs text-muted-foreground mt-2 text-center">
+              Lock the app and require password to access
+            </p>
+          </CardContent>
+        </Card>
       </div>
 
       {/* Settings change warning dialog - rendered via portal for full-screen overlay */}
@@ -508,6 +579,39 @@ export default function SettingsPage({ onNameChange }: SettingsPageProps) {
                   </Button>
                 </div>
               )}
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {/* Lock app confirmation dialog */}
+      {showLockDialog && createPortal(
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[100]">
+          <div className="bg-background border rounded-lg shadow-xl max-w-md w-full mx-4 p-6">
+            <div className="flex items-start gap-3 mb-4">
+              <LogOut className="h-6 w-6 text-muted-foreground flex-shrink-0 mt-0.5" />
+              <div>
+                <h3 className="font-semibold text-lg">Lock App?</h3>
+                <p className="text-sm text-muted-foreground mt-1">
+                  You'll need to enter your password to unlock.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-2">
+              <Button onClick={handleLock} disabled={locking} className="w-full">
+                {locking && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+                Lock
+              </Button>
+              <Button
+                variant="ghost"
+                onClick={() => setShowLockDialog(false)}
+                disabled={locking}
+                className="w-full"
+              >
+                Cancel
+              </Button>
             </div>
           </div>
         </div>,

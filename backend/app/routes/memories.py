@@ -1,9 +1,10 @@
 import asyncio
 import logging
+from pathlib import Path
 from urllib.parse import urlparse
 
-from fastapi import APIRouter, HTTPException, Query
-from fastapi.responses import StreamingResponse
+from fastapi import APIRouter, HTTPException, Query, UploadFile, File, Form, BackgroundTasks
+from fastapi.responses import StreamingResponse, FileResponse
 
 from ..events import event_manager, MemoryEvent, EventType
 from ..db import (
@@ -351,3 +352,152 @@ async def regenerate_summary(memory_id: int):
     asyncio.create_task(process_memory_async(memory_id))
 
     return {"success": True, "message": "Summary regeneration started"}
+
+
+# ============================================================================
+# Attachment Endpoints
+# ============================================================================
+
+@router.post("/memories/upload")
+async def upload_attachment(
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(...),
+    memory_id: int | None = Form(None),
+    create_memory_from_file: bool = Form(True),
+    process_content: bool = Form(True),
+):
+    """Upload a file attachment.
+    
+    If memory_id is provided, attaches to existing memory.
+    If create_memory_from_file is True and no memory_id, creates a new memory.
+    If process_content is True, extracts text/description from the file.
+    """
+    from ..services.attachment_storage import get_attachment_storage
+    from ..services.image_processor import is_image, process_image
+    from ..services.audio_processor import is_audio, process_audio
+    from ..services.pdf_processor import is_pdf, process_pdf
+    from ..services.thumbnail import generate_thumbnail
+    
+    storage = get_attachment_storage()
+    
+    try:
+        # Store the file
+        metadata = await storage.store(
+            file.file,
+            file.filename or "unnamed",
+            file.content_type,
+        )
+        
+        # Process based on file type
+        if process_content:
+            if is_image(metadata.mime_type):
+                metadata = await process_image(metadata)
+            elif is_audio(metadata.mime_type):
+                metadata = await process_audio(metadata)
+            elif is_pdf(metadata.mime_type):
+                metadata = await process_pdf(metadata)
+            else:
+                # Generate thumbnail for other types if possible
+                await generate_thumbnail(metadata)
+        
+        # Create memory if requested
+        new_memory_id = memory_id
+        if create_memory_from_file and not memory_id:
+            # Create memory with extracted content
+            content = metadata.extracted_text or metadata.description or f"File: {metadata.original_filename}"
+            
+            memory = await create_memory(
+                content=content,
+                url=None,
+                title=metadata.original_filename,
+                source="upload",
+            )
+            new_memory_id = memory.id
+            
+            # Trigger AI processing in background
+            from ..services.ai_processing import process_memory_async
+            background_tasks.add_task(process_memory_async, new_memory_id)
+        
+        return {
+            "success": True,
+            "attachment": {
+                "id": metadata.id,
+                "filename": metadata.original_filename,
+                "mime_type": metadata.mime_type,
+                "size_bytes": metadata.size_bytes,
+                "thumbnail_url": f"/api/memories/attachments/{metadata.id}/thumbnail" if metadata.thumbnail_path else None,
+                "url": f"/api/memories/attachments/{metadata.id}",
+                "extracted_text": metadata.extracted_text[:500] if metadata.extracted_text else None,
+                "description": metadata.description,
+                "width": metadata.width,
+                "height": metadata.height,
+                "duration_seconds": metadata.duration_seconds,
+            },
+            "memory_id": new_memory_id,
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Upload failed: {e}")
+        raise HTTPException(status_code=500, detail="Upload failed")
+
+
+@router.get("/memories/attachments/{attachment_id}")
+async def get_attachment(attachment_id: str):
+    """Get an attachment file."""
+    from ..services.attachment_storage import get_attachment_storage
+    
+    storage = get_attachment_storage()
+    path = storage.get_path(attachment_id)
+    
+    if not path or not path.exists():
+        raise HTTPException(status_code=404, detail="Attachment not found")
+    
+    # Determine media type
+    import mimetypes
+    media_type, _ = mimetypes.guess_type(str(path))
+    
+    return FileResponse(
+        path,
+        media_type=media_type or "application/octet-stream",
+        filename=path.name,
+    )
+
+
+@router.get("/memories/attachments/{attachment_id}/thumbnail")
+async def get_attachment_thumbnail(attachment_id: str):
+    """Get an attachment thumbnail."""
+    from ..services.attachment_storage import get_attachment_storage
+    
+    storage = get_attachment_storage()
+    thumb_path = storage.get_thumbnail_path(attachment_id)
+    
+    if not thumb_path.exists():
+        raise HTTPException(status_code=404, detail="Thumbnail not found")
+    
+    return FileResponse(
+        thumb_path,
+        media_type="image/jpeg",
+    )
+
+
+@router.delete("/memories/attachments/{attachment_id}")
+async def delete_attachment(attachment_id: str):
+    """Delete an attachment."""
+    from ..services.attachment_storage import get_attachment_storage
+    
+    storage = get_attachment_storage()
+    
+    if storage.delete(attachment_id):
+        return {"success": True}
+    else:
+        raise HTTPException(status_code=404, detail="Attachment not found")
+
+
+@router.get("/memories/storage-stats")
+async def get_storage_stats():
+    """Get attachment storage statistics."""
+    from ..services.attachment_storage import get_attachment_storage
+    
+    storage = get_attachment_storage()
+    return storage.get_storage_stats()

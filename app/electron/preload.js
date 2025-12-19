@@ -39,4 +39,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
   // Get the app token for API authentication
   getAppToken: () => appToken,
+  // Auto-updater handlers
+  onUpdateDownloaded: (callback) => {
+    ipcRenderer.on('update-downloaded', (_, version) => callback(version));
+  },
+  removeUpdateListeners: () => {
+    ipcRenderer.removeAllListeners('update-downloaded');
+  },
+  installUpdate: () => ipcRenderer.invoke('install-update'),
 });

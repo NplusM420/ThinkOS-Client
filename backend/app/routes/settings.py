@@ -80,6 +80,19 @@ class UserProfileUpdate(BaseModel):
     name: str | None = None
 
 
+class BrowserUseSettings(BaseModel):
+    """Browser automation settings."""
+    provider: ProviderType
+    model: str
+    use_local: bool = False  # If True, use local vLLM model instead of cloud provider
+    local_model: str = "browser-use/bu-30b-a3b-preview"  # Local vLLM model to use
+
+
+class VisionSettings(BaseModel):
+    """Vision model settings for image processing."""
+    model: str = "qwen/qwen3-vl-235b-a22b-instruct"
+
+
 class ProviderStatus(BaseModel):
     provider: str
     model: str
@@ -97,6 +110,15 @@ async def get_settings():
     openrouter_key = await get_api_key("openrouter")
     venice_key = await get_api_key("venice")
     morpheus_key = await get_api_key("morpheus")
+    
+    # Get browser use settings
+    browser_provider = await get_setting("browser_use_provider") or config.settings.chat_provider
+    browser_model = await get_setting("browser_use_model") or config.settings.chat_model
+    browser_use_local = await get_setting("browser_use_local") == "true"
+    browser_local_model = await get_setting("browser_use_local_model") or "browser-use/bu-30b-a3b-preview"
+    
+    # Get vision model settings
+    vision_model = await get_setting("vision_model") or "qwen/qwen3-vl-235b-a22b-instruct"
 
     return {
         # New unified settings
@@ -106,6 +128,13 @@ async def get_settings():
         "embedding_provider": config.settings.embedding_provider,
         "embedding_model": config.settings.embedding_model,
         "embedding_base_url": config.settings.embedding_base_url,
+        # Browser use settings
+        "browser_use_provider": browser_provider,
+        "browser_use_model": browser_model,
+        "browser_use_local": browser_use_local,
+        "browser_use_local_model": browser_local_model,
+        # Vision model settings
+        "vision_model": vision_model,
         # Provider API key status (masked)
         "provider_keys": {
             "openai": bool(openai_key),
@@ -281,6 +310,84 @@ async def get_ollama_status() -> OllamaStatus:
     return OllamaStatus(installed=False, running=False)
 
 
+@router.get("/settings/browser-use")
+async def get_browser_use_settings():
+    """Get browser automation settings."""
+    from ..services import vllm_manager
+    
+    browser_provider = await get_setting("browser_use_provider") or config.settings.chat_provider
+    browser_model = await get_setting("browser_use_model") or config.settings.chat_model
+    use_local = await get_setting("browser_use_local") == "true"
+    local_model = await get_setting("browser_use_local_model") or "browser-use/bu-30b-a3b-preview"
+    
+    # Get local model status
+    local_model_info = vllm_manager.get_model_info(local_model) if use_local else None
+    
+    return {
+        "provider": browser_provider,
+        "model": browser_model,
+        "use_local": use_local,
+        "local_model": local_model,
+        "local_model_status": local_model_info.get("status") if local_model_info else None,
+        "vllm_models": vllm_manager.get_all_models(),
+    }
+
+
+@router.post("/settings/browser-use")
+async def update_browser_use_settings(update: BrowserUseSettings):
+    """Update browser automation settings."""
+    await set_setting("browser_use_provider", update.provider)
+    await set_setting("browser_use_model", update.model)
+    await set_setting("browser_use_local", "true" if update.use_local else "false")
+    await set_setting("browser_use_local_model", update.local_model)
+    return {"success": True}
+
+
+@router.post("/settings/browser-use/download-local")
+async def download_browser_use_local_model(model_id: str = "browser-use/bu-30b-a3b-preview"):
+    """Download the local browser use model (vLLM)."""
+    from ..services import vllm_manager
+    
+    success = await vllm_manager.download_model(model_id)
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to download model")
+    return {"success": True}
+
+
+@router.post("/settings/browser-use/start-local")
+async def start_browser_use_local_server(model_id: str = "browser-use/bu-30b-a3b-preview"):
+    """Start the local vLLM server for browser use."""
+    from ..services import vllm_manager
+    
+    success = await vllm_manager.start_model_server(model_id)
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to start vLLM server")
+    return {"success": True, "base_url": vllm_manager.get_vllm_base_url(model_id)}
+
+
+@router.post("/settings/browser-use/stop-local")
+async def stop_browser_use_local_server(model_id: str = "browser-use/bu-30b-a3b-preview"):
+    """Stop the local vLLM server."""
+    from ..services import vllm_manager
+    
+    vllm_manager.stop_model_server(model_id)
+    return {"success": True}
+
+
+@router.get("/settings/browser-use/local-status")
+async def get_browser_use_local_status(model_id: str = "browser-use/bu-30b-a3b-preview"):
+    """Get status of the local browser use model."""
+    from ..services import vllm_manager
+    
+    info = vllm_manager.get_model_info(model_id)
+    gpu_info = vllm_manager.check_gpu_available()
+    
+    return {
+        "model": info,
+        "gpu": gpu_info,
+    }
+
+
 @router.get("/settings/provider-status")
 async def get_provider_status() -> ProviderStatus:
     """Get current provider status for sidebar indicator."""
@@ -319,6 +426,28 @@ async def get_provider_status() -> ProviderStatus:
             status="ready" if has_key else "no-key",
             status_label="Ready" if has_key else "No API Key",
         )
+
+
+@router.get("/settings/vision")
+async def get_vision_settings():
+    """Get vision model settings."""
+    from ..services.secrets import get_api_key
+    
+    model = await get_setting("vision_model") or "qwen/qwen3-vl-235b-a22b-instruct"
+    openrouter_key = await get_api_key("openrouter")
+    
+    return {
+        "model": model,
+        "has_api_key": bool(openrouter_key),
+        "provider": "openrouter",
+    }
+
+
+@router.post("/settings/vision")
+async def update_vision_settings(settings: VisionSettings):
+    """Update vision model settings."""
+    await set_setting("vision_model", settings.model)
+    return {"success": True, "model": settings.model}
 
 
 @router.get("/settings/profile")
@@ -374,12 +503,24 @@ OPENAI_EMBEDDING_MODELS = [
 OLLAMA_EMBEDDING_MODELS = [
     "mxbai-embed-large",
     "snowflake-arctic-embed",
+    "all-minilm",
 ]
 
 # Models that should never be shown (known to be broken or impractical)
 # nomic-embed-text crashes with EOF on content >5000 chars
 # all-minilm has 256 token context - too small for real documents
 BLOCKED_EMBEDDING_MODELS = ["nomic-embed-text", "all-minilm"]
+
+# Popular Ollama chat models to suggest for download
+OLLAMA_CHAT_MODELS = [
+    "llama3.2",
+    "llama3.1",
+    "mistral",
+    "phi3",
+    "gemma2",
+    "qwen2.5",
+    "deepseek-coder",
+]
 
 
 @router.get("/settings/models")
@@ -411,6 +552,17 @@ async def get_available_models(provider: str | None = None) -> ModelsResponse:
                         ))
         except Exception as e:
             print(f"Error fetching Ollama models: {e}")
+
+        # Add suggested chat models that aren't downloaded yet
+        downloaded_base_names = {m.name.split(":")[0] for m in models}
+        for model_name in OLLAMA_CHAT_MODELS:
+            if model_name not in downloaded_base_names:
+                models.append(ModelInfo(
+                    name=model_name,
+                    size=None,
+                    is_downloaded=False,
+                    context_window=get_context_window(model_name),
+                ))
 
         return ModelsResponse(
             models=models,

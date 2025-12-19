@@ -91,6 +91,24 @@ def get_session_maker() -> sessionmaker:
     return _session_maker
 
 
+def get_engine():
+    """Get the database engine instance."""
+    if _engine is None:
+        raise RuntimeError("Database not initialized")
+    return _engine
+
+
+def get_db():
+    """FastAPI dependency to get a database session."""
+    if _session_maker is None:
+        raise RuntimeError("Database not initialized")
+    db = _session_maker()
+    try:
+        yield db
+    finally:
+        db.close()
+
+
 def get_executor():
     """Get the thread pool executor."""
     return _executor

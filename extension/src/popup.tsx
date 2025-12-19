@@ -146,20 +146,41 @@ function Popup() {
         return;
       }
 
-      try {
-        // Try to send message to existing content script
-        await chrome.tabs.sendMessage(tab.id, { action: 'openSidebar' });
-        window.close();
-      } catch {
-        // Content script not loaded, inject it first
-        await chrome.scripting.executeScript({
-          target: { tabId: tab.id },
-          files: ['content.js'],
+      // Helper to send message and wait for response
+      const sendOpenSidebar = (): Promise<boolean> => {
+        return new Promise((resolve) => {
+          chrome.tabs.sendMessage(tab.id!, { action: 'openSidebar' }, (response) => {
+            if (chrome.runtime.lastError) {
+              resolve(false);
+            } else {
+              resolve(response?.success === true);
+            }
+          });
         });
-        // Wait a bit for script to initialize
-        await new Promise(resolve => setTimeout(resolve, 100));
-        await chrome.tabs.sendMessage(tab.id, { action: 'openSidebar' });
+      };
+
+      // Try to send message to existing content script
+      let success = await sendOpenSidebar();
+      
+      if (!success) {
+        // Content script not loaded or not responding, inject it first
+        try {
+          await chrome.scripting.executeScript({
+            target: { tabId: tab.id },
+            files: ['content.js'],
+          });
+          // Wait for script to initialize
+          await new Promise(resolve => setTimeout(resolve, 200));
+          success = await sendOpenSidebar();
+        } catch (injectErr) {
+          console.error('Failed to inject content script:', injectErr);
+        }
+      }
+
+      if (success) {
         window.close();
+      } else {
+        setStatus('Could not open chat on this page');
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown error';

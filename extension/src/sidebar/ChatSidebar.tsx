@@ -1,8 +1,26 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { Button } from '@/components/ui/button';
-import { BookOpen, ChevronRight, ExternalLink, FileText, Bookmark, Save, Sparkles, MoreHorizontal, Check, Send, Loader2, Copy } from 'lucide-react';
+import { BookOpen, ChevronRight, ExternalLink, FileText, Bookmark, Save, Sparkles, MoreHorizontal, Check, Send, Loader2, Copy, Volume2, VolumeX, Mic, MicOff, Square, ChevronDown, Bot } from 'lucide-react';
 import type { ChatMessageData, ChatResponse, SourceMemory, SaveConversationResult, SummarizeChatResult, MemoryData } from '../native-client';
+
+// Agent type for dropdown
+interface Agent {
+  id: number;
+  name: string;
+  description: string | null;
+  system_prompt: string;
+  is_enabled: boolean;
+}
+
+// Default Think agent (built-in)
+const DEFAULT_AGENT: Agent = {
+  id: 0,
+  name: 'Think',
+  description: 'Your intelligent personal assistant',
+  system_prompt: '', // Uses default system prompt
+  is_enabled: true,
+};
 
 // Helper to send messages via background script
 function sendToBackground<T>(type: string, data: unknown): Promise<T> {
@@ -72,6 +90,21 @@ interface ChatSidebarProps {
   onClose: () => void;
 }
 
+// TTS Response type
+interface TTSResponse {
+  audio_base64: string;
+  sample_rate: number;
+  duration_seconds: number;
+}
+
+// STT Response type
+interface STTResponse {
+  text: string;
+  timestamps?: Array<{ start: number; end: number; text: string }>;
+  confidence?: number;
+  analysis?: string;
+}
+
 export function ChatSidebar({ pageContent, pageUrl, pageTitle, onClose }: ChatSidebarProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
@@ -86,6 +119,21 @@ export function ChatSidebar({ pageContent, pageUrl, pageTitle, onClose }: ChatSi
   const [pageSummary, setPageSummary] = useState<string | null>(null);
   // Follow-up suggestions from LLM
   const [followupSuggestions, setFollowupSuggestions] = useState<string[]>([]);
+  
+  // Agent selection state
+  const [agents, setAgents] = useState<Agent[]>([DEFAULT_AGENT]);
+  const [selectedAgent, setSelectedAgent] = useState<Agent>(DEFAULT_AGENT);
+  const [showAgentDropdown, setShowAgentDropdown] = useState(false);
+  
+  // Voice state
+  const [readingMode, setReadingMode] = useState(false);
+  const [isRecording, setIsRecording] = useState(false);
+  const [isSpeaking, setIsSpeaking] = useState(false);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const currentAudioSourceRef = useRef<AudioBufferSourceNode | null>(null);
+  
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -100,6 +148,41 @@ export function ChatSidebar({ pageContent, pageUrl, pageTitle, onClose }: ChatSi
   useEffect(() => {
     inputRef.current?.focus();
   }, []);
+
+  // Fetch available agents on mount
+  useEffect(() => {
+    const fetchAgents = async () => {
+      try {
+        const result = await sendToBackground<{ agents: Agent[] }>('LIST_AGENTS', { enabled_only: true });
+        if (result.agents && result.agents.length > 0) {
+          setAgents([DEFAULT_AGENT, ...result.agents]);
+        }
+      } catch (err) {
+        console.error('Failed to fetch agents:', err);
+        // Keep default agent only
+      }
+    };
+    fetchAgents();
+  }, []);
+
+  // Close dropdowns when clicking outside
+  useEffect(() => {
+    const handleClickOutside = () => {
+      setShowAgentDropdown(false);
+      setShowActions(false);
+    };
+    
+    if (showAgentDropdown || showActions) {
+      // Delay to avoid immediate close on the click that opened it
+      const timer = setTimeout(() => {
+        document.addEventListener('click', handleClickOutside);
+      }, 0);
+      return () => {
+        clearTimeout(timer);
+        document.removeEventListener('click', handleClickOutside);
+      };
+    }
+  }, [showAgentDropdown, showActions]);
 
   const sendMessage = async (messageText?: string) => {
     const userMessage = (messageText || input).trim();
@@ -120,6 +203,11 @@ export function ChatSidebar({ pageContent, pageUrl, pageTitle, onClose }: ChatSi
         history: messages,
         // Include cached page summary if available (frontend passback caching)
         ...(pageSummary && { page_summary: pageSummary }),
+        // Include agent system prompt if using a custom agent
+        ...(selectedAgent.id !== 0 && selectedAgent.system_prompt && { 
+          agent_system_prompt: selectedAgent.system_prompt,
+          agent_id: selectedAgent.id,
+        }),
       };
 
       const response = await sendChatMessageViaBackground(data);
@@ -226,15 +314,204 @@ export function ChatSidebar({ pageContent, pageUrl, pageTitle, onClose }: ChatSi
     }
   };
 
+  // TTS: Speak text using backend TTS
+  const speakText = useCallback(async (text: string) => {
+    if (!text || isSpeaking) return;
+    
+    setIsSpeaking(true);
+    try {
+      const response = await sendToBackground<TTSResponse>('VOICE_TTS', { text });
+      
+      // Decode base64 audio and play it
+      const audioData = atob(response.audio_base64);
+      const audioArray = new Uint8Array(audioData.length);
+      for (let i = 0; i < audioData.length; i++) {
+        audioArray[i] = audioData.charCodeAt(i);
+      }
+      
+      // Create audio context if needed
+      if (!audioContextRef.current) {
+        audioContextRef.current = new AudioContext();
+      }
+      
+      const audioBuffer = await audioContextRef.current.decodeAudioData(audioArray.buffer);
+      const source = audioContextRef.current.createBufferSource();
+      source.buffer = audioBuffer;
+      source.connect(audioContextRef.current.destination);
+      currentAudioSourceRef.current = source;
+      
+      source.onended = () => {
+        setIsSpeaking(false);
+        currentAudioSourceRef.current = null;
+      };
+      
+      source.start();
+    } catch (err) {
+      console.error('TTS error:', err);
+      setError(err instanceof Error ? err.message : 'Failed to speak');
+      setIsSpeaking(false);
+    }
+  }, [isSpeaking]);
+
+  // Stop speaking
+  const stopSpeaking = useCallback(() => {
+    if (currentAudioSourceRef.current) {
+      currentAudioSourceRef.current.stop();
+      currentAudioSourceRef.current = null;
+    }
+    setIsSpeaking(false);
+  }, []);
+
+  // STT: Start recording
+  const startRecording = useCallback(async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
+      mediaRecorderRef.current = mediaRecorder;
+      audioChunksRef.current = [];
+
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
+        }
+      };
+
+      mediaRecorder.onstop = async () => {
+        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+        stream.getTracks().forEach(track => track.stop());
+        
+        // Convert to base64
+        const reader = new FileReader();
+        reader.onloadend = async () => {
+          const base64 = (reader.result as string).split(',')[1];
+          
+          try {
+            const response = await sendToBackground<STTResponse>('VOICE_STT', { 
+              audio_base64: base64 
+            });
+            
+            if (response.text) {
+              setInput(prev => prev + (prev ? ' ' : '') + response.text);
+              inputRef.current?.focus();
+            }
+          } catch (err) {
+            console.error('STT error:', err);
+            setError(err instanceof Error ? err.message : 'Failed to transcribe');
+          }
+        };
+        reader.readAsDataURL(audioBlob);
+      };
+
+      mediaRecorder.start();
+      setIsRecording(true);
+    } catch (err) {
+      console.error('Recording error:', err);
+      setError('Microphone access denied');
+    }
+  }, []);
+
+  // STT: Stop recording
+  const stopRecording = useCallback(() => {
+    if (mediaRecorderRef.current && isRecording) {
+      mediaRecorderRef.current.stop();
+      setIsRecording(false);
+    }
+  }, [isRecording]);
+
+  // Toggle recording
+  const toggleRecording = useCallback(() => {
+    if (isRecording) {
+      stopRecording();
+    } else {
+      startRecording();
+    }
+  }, [isRecording, startRecording, stopRecording]);
+
+  // Auto-speak new assistant messages when reading mode is on
+  useEffect(() => {
+    if (readingMode && messages.length > 0) {
+      const lastMessage = messages[messages.length - 1];
+      if (lastMessage.role === 'assistant' && !loading) {
+        speakText(lastMessage.content);
+      }
+    }
+  }, [messages, readingMode, loading, speakText]);
+
+  // Cleanup audio context on unmount
+  useEffect(() => {
+    return () => {
+      if (audioContextRef.current) {
+        audioContextRef.current.close();
+      }
+    };
+  }, []);
+
   return (
     <div className="flex flex-col h-full bg-background text-foreground">
       {/* Header */}
       <div className="flex items-center justify-between p-3 border-b border-border">
         <div className="flex items-center gap-2">
-          <img src={chrome.runtime.getURL('branding/Think_OS_Full_Word_Mark-lightmode.svg')} alt="Think" className="h-5 dark:hidden" />
-          <img src={chrome.runtime.getURL('branding/Think_OS_Full_Word_Mark.svg')} alt="Think" className="h-5 hidden dark:block" />
+          {/* Agent selector dropdown */}
+          <div className="relative">
+            <button
+              onClick={() => setShowAgentDropdown(!showAgentDropdown)}
+              className="flex items-center gap-1.5 px-2 py-1 rounded-md hover:bg-secondary transition-colors text-sm"
+              title={selectedAgent.description || selectedAgent.name}
+            >
+              <Bot className="w-4 h-4 text-primary" />
+              <span className="font-medium max-w-[120px] truncate">{selectedAgent.name}</span>
+              <ChevronDown className="w-3 h-3 text-muted-foreground" />
+            </button>
+            {showAgentDropdown && (
+              <div className="absolute left-0 top-full mt-1 w-56 bg-white/70 dark:bg-white/5 backdrop-blur-xl border border-white/60 dark:border-white/10 rounded-lg shadow-lg shadow-black/10 dark:shadow-black/30 z-20 py-1 max-h-64 overflow-y-auto">
+                {agents.map((agent) => (
+                  <button
+                    key={agent.id}
+                    onClick={() => {
+                      setSelectedAgent(agent);
+                      setShowAgentDropdown(false);
+                    }}
+                    className={`w-full flex flex-col items-start px-3 py-2 text-sm hover:bg-secondary transition-colors ${
+                      selectedAgent.id === agent.id ? 'bg-primary/10' : ''
+                    }`}
+                  >
+                    <span className="font-medium">{agent.name}</span>
+                    {agent.description && (
+                      <span className="text-xs text-muted-foreground truncate w-full text-left">
+                        {agent.description}
+                      </span>
+                    )}
+                  </button>
+                ))}
+                {agents.length === 1 && (
+                  <div className="px-3 py-2 text-xs text-muted-foreground">
+                    Create agents in the Think app
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
         </div>
         <div className="flex items-center gap-1">
+          {/* Reading mode toggle */}
+          <button
+            onClick={() => {
+              if (isSpeaking) stopSpeaking();
+              setReadingMode(!readingMode);
+            }}
+            className={`p-1.5 rounded transition-colors ${readingMode ? 'bg-primary/20 text-primary' : 'hover:bg-secondary'}`}
+            aria-label={readingMode ? 'Disable reading mode' : 'Enable reading mode'}
+            title={readingMode ? 'Reading mode ON - AI responses will be spoken' : 'Enable reading mode'}
+          >
+            {isSpeaking ? (
+              <Square className="w-4 h-4" />
+            ) : readingMode ? (
+              <Volume2 className="w-4 h-4" />
+            ) : (
+              <VolumeX className="w-4 h-4" />
+            )}
+          </button>
+          
           {/* Actions menu */}
           <div className="relative">
             <button
@@ -421,15 +698,34 @@ export function ChatSidebar({ pageContent, pageUrl, pageTitle, onClose }: ChatSi
       {/* Input */}
       <div className="p-3 border-t border-border">
         <div className="relative flex items-center gap-2 p-2 rounded-full bg-white/70 dark:bg-white/5 backdrop-blur-xl border border-white/60 dark:border-white/10 shadow-lg shadow-black/5 dark:shadow-black/20">
+          {/* Mic button */}
+          <button
+            onClick={toggleRecording}
+            disabled={loading}
+            className={`h-10 w-10 flex items-center justify-center rounded-full shrink-0 transition-colors ${
+              isRecording 
+                ? 'bg-destructive text-destructive-foreground animate-pulse' 
+                : 'hover:bg-secondary text-muted-foreground hover:text-foreground'
+            }`}
+            aria-label={isRecording ? 'Stop recording' : 'Start voice input'}
+            title={isRecording ? 'Stop recording' : 'Voice input'}
+          >
+            {isRecording ? (
+              <MicOff className="h-4 w-4" />
+            ) : (
+              <Mic className="h-4 w-4" />
+            )}
+          </button>
+          
           <input
             ref={inputRef}
             type="text"
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Ask about this page..."
-            disabled={loading}
-            className="flex-1 bg-transparent px-4 py-2 text-base placeholder:text-muted-foreground/60 focus:outline-none disabled:opacity-50"
+            placeholder={isRecording ? "Listening..." : "Ask about this page..."}
+            disabled={loading || isRecording}
+            className="flex-1 bg-transparent px-2 py-2 text-base placeholder:text-muted-foreground/60 focus:outline-none disabled:opacity-50"
           />
           <Button
             size="icon"

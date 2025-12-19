@@ -23,3 +23,13 @@ export const chips = {
     "bg-white/70 dark:bg-white/5 border border-white/60 dark:border-white/10 hover:bg-primary/10",
   primary: "bg-primary/10 text-primary hover:bg-primary/20",
 };
+
+// Full-screen editor (NoteEditor)
+export const editor = {
+  container: "fixed inset-0 z-50 bg-background",
+  toolbar: "inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-muted/50 border border-border/50",
+  content: "max-w-3xl mx-auto px-6 py-8",
+  title: "w-full text-3xl font-semibold bg-transparent border-none outline-none placeholder:text-muted-foreground/50",
+  actionBar: "flex items-center justify-end gap-4 px-6 py-4 border-t border-border/30",
+  actionBarWarning: "bg-amber-500/10 border-t-amber-500/30",
+};

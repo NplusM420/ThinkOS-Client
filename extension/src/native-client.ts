@@ -225,6 +225,10 @@ export interface ChatMessageData {
   history?: Array<{ role: "user" | "assistant"; content: string }>;
   /** Cached page summary from previous response (frontend passback caching) */
   page_summary?: string;
+  /** Custom agent system prompt (overrides default Think personality) */
+  agent_system_prompt?: string;
+  /** Agent ID for tracking */
+  agent_id?: number;
 }
 
 /**

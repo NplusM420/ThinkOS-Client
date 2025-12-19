@@ -19,6 +19,9 @@ from .services.query_rewriting import maybe_rewrite_query
 from .services.special_handlers import is_special_prompt, execute_special_handler
 from .services.suggestions import generate_followup_suggestions
 from .services.memory_filtering import filter_memories_dynamically, format_memories_as_context
+from .services.text_to_speech import synthesize_speech
+from .services.speech_to_text import transcribe_audio
+from .models.voice import TTSRequest, STTRequest
 from .events import event_manager, MemoryEvent, EventType
 
 logger = logging.getLogger(__name__)
@@ -137,6 +140,12 @@ class NativeMessagingServer:
                 result = await self._save_conversation(params)
             elif method == "chat.summarize":
                 result = await self._summarize_chat(params)
+            elif method == "voice.tts":
+                result = await self._text_to_speech(params)
+            elif method == "voice.stt":
+                result = await self._speech_to_text(params)
+            elif method == "agents.list":
+                result = await self._list_agents(params)
             else:
                 return {
                     "id": request_id,
@@ -273,6 +282,8 @@ Summary:"""
         history = params.get("history", [])
         # Frontend passback caching - use cached summary if provided
         page_summary = params.get("page_summary", "")
+        # Custom agent system prompt (overrides default Think personality)
+        agent_system_prompt = params.get("agent_system_prompt", "")
 
         if not message:
             raise ValueError("Missing required parameter: message")
@@ -358,8 +369,16 @@ Summary:"""
         # Combine context
         context = "\n\n---\n\n".join(context_parts) if context_parts else ""
 
-        # Get AI response
-        response = await chat(message, context=context, history=history)
+        # Get AI response - use custom agent prompt if provided
+        if agent_system_prompt:
+            response = await chat(
+                message, 
+                context=context, 
+                history=history,
+                custom_system_prompt=agent_system_prompt
+            )
+        else:
+            response = await chat(message, context=context, history=history)
 
         result = {"response": response, "sources": sources}
 
@@ -492,6 +511,77 @@ Title:"""
         asyncio.create_task(process_memory_async(result["id"]))
 
         return {"memory_id": result["id"], "title": title, "summary": summary}
+
+    async def _text_to_speech(self, params: dict) -> dict:
+        """Handle voice.tts request - convert text to speech."""
+        text = params.get("text", "")
+        if not text:
+            raise ValueError("Missing required parameter: text")
+
+        request = TTSRequest(
+            text=text,
+            voice_prompt_path=params.get("voice_prompt_path"),
+            language=params.get("language", "en"),
+            exaggeration=params.get("exaggeration", 0.5),
+            cfg_weight=params.get("cfg_weight", 0.5),
+        )
+
+        response = await synthesize_speech(request)
+        return {
+            "audio_base64": response.audio_base64,
+            "sample_rate": response.sample_rate,
+            "duration_seconds": response.duration_seconds,
+        }
+
+    async def _speech_to_text(self, params: dict) -> dict:
+        """Handle voice.stt request - convert speech to text."""
+        audio_base64 = params.get("audio_base64", "")
+        if not audio_base64:
+            raise ValueError("Missing required parameter: audio_base64")
+
+        request = STTRequest(
+            audio_base64=audio_base64,
+            include_timestamps=params.get("include_timestamps", False),
+            llm_prompt=params.get("llm_prompt"),
+        )
+
+        response = await transcribe_audio(request)
+        return {
+            "text": response.text,
+            "timestamps": response.timestamps,
+            "confidence": response.confidence,
+            "analysis": response.analysis,
+        }
+
+    async def _list_agents(self, params: dict) -> dict:
+        """Handle agents.list request - list available agents."""
+        from .db.core import get_sync_db
+        from . import models as db_models
+        
+        enabled_only = params.get("enabled_only", True)
+        
+        db = next(get_sync_db())
+        try:
+            query = db.query(db_models.Agent)
+            if enabled_only:
+                query = query.filter(db_models.Agent.is_enabled == True)
+            
+            agents = query.order_by(db_models.Agent.name).all()
+            
+            return {
+                "agents": [
+                    {
+                        "id": a.id,
+                        "name": a.name,
+                        "description": a.description,
+                        "system_prompt": a.system_prompt,
+                        "is_enabled": a.is_enabled,
+                    }
+                    for a in agents
+                ]
+            }
+        finally:
+            db.close()
 
 
 # Global server instances

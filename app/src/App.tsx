@@ -7,6 +7,8 @@ import HomePage from "./pages/HomePage";
 import ChatPage from "./pages/ChatPage";
 import MemoriesPage from "./pages/MemoriesPage";
 import SettingsPage from "./pages/SettingsPage";
+import InboxPage from "./pages/InboxPage";
+import { AgentsPage } from "./pages/AgentsPage";
 import { NamePromptDialog } from "./components/NamePromptDialog";
 import { Button } from "@/components/ui/button";
 import { Toaster } from "@/components/ui/sonner";
@@ -236,6 +238,8 @@ function App() {
             <Route path="/" element={<HomePage userName={userName} />} />
             <Route path="/memories" element={<MemoriesPage />} />
             <Route path="/chat" element={<ChatPage />} />
+            <Route path="/inbox" element={<InboxPage />} />
+            <Route path="/agents" element={<AgentsPage />} />
             <Route
               path="/settings"
               element={<SettingsPage onNameChange={setUserName} />}

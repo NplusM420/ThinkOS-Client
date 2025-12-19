@@ -68,11 +68,10 @@
   position: fixed !important;
   top: 0 !important;
   right: 0 !important;
-  width: 350px !important;
   height: 100vh !important;
   z-index: 2147483647 !important;
   box-shadow: -4px 0 12px rgba(0, 0, 0, 0.15);
-  font-family: 'Work Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   background-color: hsl(var(--background));
@@ -171,4 +170,29 @@
   padding-left: 0.75rem;
   font-style: italic;
   margin: 0.5em 0;
+}
+
+/* Resize handle */
+.resize-handle {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 6px;
+  height: 100%;
+  cursor: ew-resize;
+  background: transparent;
+  transition: background-color 0.2s;
+  z-index: 10;
+}
+
+.resize-handle:hover {
+  background-color: hsl(var(--primary) / 0.3);
+}
+
+#think-sidebar-wrapper.is-dragging .resize-handle {
+  background-color: hsl(var(--primary) / 0.5);
+}
+
+#think-sidebar-wrapper.is-dragging {
+  user-select: none;
 }

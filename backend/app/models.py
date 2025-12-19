@@ -110,3 +110,149 @@ class Job(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class Tool(Base):
+    __tablename__ = "tools"
+
+    id: Mapped[str] = mapped_column(String(100), primary_key=True)
+    name: Mapped[str] = mapped_column(String(100))
+    description: Mapped[str] = mapped_column(Text)
+    category: Mapped[str] = mapped_column(String(50))
+    parameters_schema: Mapped[str] = mapped_column(Text)
+    permissions: Mapped[str | None] = mapped_column(Text, nullable=True)
+    is_builtin: Mapped[bool] = mapped_column(default=False)
+    is_enabled: Mapped[bool] = mapped_column(default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class ToolExecution(Base):
+    __tablename__ = "tool_executions"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    tool_id: Mapped[str] = mapped_column(String(100), ForeignKey("tools.id", ondelete="CASCADE"))
+    agent_run_id: Mapped[int | None] = mapped_column(ForeignKey("agent_runs.id", ondelete="SET NULL"), nullable=True)
+    parameters: Mapped[str | None] = mapped_column(Text, nullable=True)
+    result: Mapped[str | None] = mapped_column(Text, nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(String(20), default="pending")
+    duration_ms: Mapped[int | None] = mapped_column(nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class Secret(Base):
+    __tablename__ = "secrets"
+
+    name: Mapped[str] = mapped_column(String(100), primary_key=True)
+    encrypted_value: Mapped[bytes] = mapped_column(LargeBinary)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class Agent(Base):
+    __tablename__ = "agents"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(100))
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    system_prompt: Mapped[str] = mapped_column(Text)
+    model_provider: Mapped[str] = mapped_column(String(50), default="openai")
+    model_name: Mapped[str] = mapped_column(String(100), default="gpt-4o")
+    tools: Mapped[str | None] = mapped_column(Text, nullable=True)
+    max_steps: Mapped[int] = mapped_column(default=10)
+    timeout_seconds: Mapped[int] = mapped_column(default=300)
+    is_enabled: Mapped[bool] = mapped_column(default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    runs: Mapped[list["AgentRun"]] = relationship(back_populates="agent", cascade="all, delete-orphan")
+
+
+class AgentRun(Base):
+    __tablename__ = "agent_runs"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    agent_id: Mapped[int] = mapped_column(ForeignKey("agents.id", ondelete="CASCADE"))
+    input: Mapped[str] = mapped_column(Text)
+    output: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(String(20), default="pending")
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    steps_completed: Mapped[int] = mapped_column(default=0)
+    total_tokens: Mapped[int | None] = mapped_column(nullable=True)
+    duration_ms: Mapped[int | None] = mapped_column(nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    agent: Mapped["Agent"] = relationship(back_populates="runs")
+    steps: Mapped[list["AgentRunStep"]] = relationship(back_populates="run", cascade="all, delete-orphan", order_by="AgentRunStep.step_number")
+
+
+class AgentRunStep(Base):
+    __tablename__ = "agent_run_steps"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    run_id: Mapped[int] = mapped_column(ForeignKey("agent_runs.id", ondelete="CASCADE"))
+    step_number: Mapped[int] = mapped_column()
+    step_type: Mapped[str] = mapped_column(String(20))
+    content: Mapped[str | None] = mapped_column(Text, nullable=True)
+    tool_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    tool_input: Mapped[str | None] = mapped_column(Text, nullable=True)
+    tool_output: Mapped[str | None] = mapped_column(Text, nullable=True)
+    tokens_used: Mapped[int | None] = mapped_column(nullable=True)
+    duration_ms: Mapped[int | None] = mapped_column(nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    run: Mapped["AgentRun"] = relationship(back_populates="steps")
+
+
+class Workflow(Base):
+    __tablename__ = "workflows"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(200))
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    nodes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    edges: Mapped[str | None] = mapped_column(Text, nullable=True)
+    variables: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(String(20), default="draft")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    runs: Mapped[list["WorkflowRun"]] = relationship(back_populates="workflow", cascade="all, delete-orphan")
+
+
+class WorkflowRun(Base):
+    __tablename__ = "workflow_runs"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    workflow_id: Mapped[int] = mapped_column(ForeignKey("workflows.id", ondelete="CASCADE"))
+    status: Mapped[str] = mapped_column(String(20), default="pending")
+    input: Mapped[str | None] = mapped_column(Text, nullable=True)
+    output: Mapped[str | None] = mapped_column(Text, nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    current_node_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    workflow: Mapped["Workflow"] = relationship(back_populates="runs")
+    steps: Mapped[list["WorkflowRunStep"]] = relationship(back_populates="run", cascade="all, delete-orphan")
+
+
+class WorkflowRunStep(Base):
+    __tablename__ = "workflow_run_steps"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    run_id: Mapped[int] = mapped_column(ForeignKey("workflow_runs.id", ondelete="CASCADE"))
+    node_id: Mapped[str] = mapped_column(String(100))
+    status: Mapped[str] = mapped_column(String(20))
+    output: Mapped[str | None] = mapped_column(Text, nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    duration_ms: Mapped[int | None] = mapped_column(nullable=True)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    run: Mapped["WorkflowRun"] = relationship(back_populates="steps")

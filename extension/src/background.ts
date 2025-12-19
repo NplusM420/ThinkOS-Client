@@ -94,6 +94,54 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       });
     return true;
   }
+
+  if (message.type === 'VOICE_TTS') {
+    // Text-to-speech via native messaging
+    startKeepAlive();
+    nativeClient
+      .request('voice.tts', message.data)
+      .then((result) => {
+        stopKeepAlive();
+        sendResponse({ success: true, result });
+      })
+      .catch((error) => {
+        stopKeepAlive();
+        console.error('[Think] TTS error:', error.message);
+        sendResponse({ success: false, error: error.message });
+      });
+    return true;
+  }
+
+  if (message.type === 'VOICE_STT') {
+    // Speech-to-text via native messaging
+    startKeepAlive();
+    nativeClient
+      .request('voice.stt', message.data)
+      .then((result) => {
+        stopKeepAlive();
+        sendResponse({ success: true, result });
+      })
+      .catch((error) => {
+        stopKeepAlive();
+        console.error('[Think] STT error:', error.message);
+        sendResponse({ success: false, error: error.message });
+      });
+    return true;
+  }
+
+  if (message.type === 'LIST_AGENTS') {
+    // List available agents
+    nativeClient
+      .request('agents.list', message.data || {})
+      .then((result) => {
+        sendResponse({ success: true, result });
+      })
+      .catch((error) => {
+        console.error('[Think] List agents error:', error.message);
+        sendResponse({ success: false, error: error.message });
+      });
+    return true;
+  }
 });
 
 // Log when service worker starts

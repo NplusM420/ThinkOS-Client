@@ -308,22 +308,6 @@ export function ProviderSettings() {
           </p>
         </div>
 
-        {/* Base URL (for cloud providers) */}
-        {chatProvider !== "ollama" && (
-          <div className="space-y-2">
-            <label className="text-sm font-medium">API Base URL</label>
-            <Input
-              type="text"
-              value={chatBaseUrl}
-              onChange={(e) => setChatBaseUrl(e.target.value)}
-              placeholder={chatProviderConfig?.base_url || "https://api.example.com/v1"}
-            />
-            <p className="text-xs text-muted-foreground">
-              Auto-filled for {chatProviderConfig?.name}. Modify if using a custom endpoint.
-            </p>
-          </div>
-        )}
-
         {/* API Key (for cloud providers) */}
         {chatProvider !== "ollama" && (
           <div className="space-y-2">
@@ -378,19 +362,6 @@ export function ProviderSettings() {
             placeholder="Enter model name..."
           />
         </div>
-
-        {/* Base URL (for cloud providers) */}
-        {embeddingProvider !== "ollama" && (
-          <div className="space-y-2">
-            <label className="text-sm font-medium">API Base URL</label>
-            <Input
-              type="text"
-              value={embeddingBaseUrl}
-              onChange={(e) => setEmbeddingBaseUrl(e.target.value)}
-              placeholder={embeddingProviderConfig?.base_url || "https://api.example.com/v1"}
-            />
-          </div>
-        )}
 
         {/* API Key (for cloud providers) */}
         {embeddingProvider !== "ollama" && (

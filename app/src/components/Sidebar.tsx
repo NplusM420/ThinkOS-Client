@@ -1,5 +1,5 @@
 import { NavLink } from "react-router-dom";
-import { Home, Brain, Settings, MessageSquare } from "lucide-react";
+import { Home, Brain, Settings, MessageSquare, Inbox, Bot } from "lucide-react";
 import ProviderStatusIndicator from "./ProviderStatusIndicator";
 import { useConversation } from "@/contexts/ConversationContext";
 
@@ -7,6 +7,8 @@ const navItems = [
   { to: "/", icon: Home, label: "Home" },
   { to: "/memories", icon: Brain, label: "Memories" },
   { to: "/chat", icon: MessageSquare, label: "Chats" },
+  { to: "/agents", icon: Bot, label: "Agents" },
+  { to: "/inbox", icon: Inbox, label: "Inbox" },
   { to: "/settings", icon: Settings, label: "Settings" },
 ];
 
