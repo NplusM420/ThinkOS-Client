@@ -5,10 +5,16 @@ Integrates with the Clipper platform to create video clips using the Clippy AI a
 Allows ThinkOS agents to send video URLs and prompts to Clipper and receive
 generated clips with captions and aspect ratios.
 
-The clips are automatically saved as memories in ThinkOS for future reference.
+The clips are automatically saved to the ThinkOS clips library for future reference.
+
+API Spec:
+- Authentication: Bearer token or X-API-Key header (keys start with 'clipper_')
+- Base URL: {clipper_url}/api/v1/clippy
+- Endpoints: /health, /generate, /jobs/:jobId
 """
 
 import json
+import asyncio
 from typing import Any
 from datetime import datetime
 
@@ -19,27 +25,42 @@ class Plugin:
     
     Configuration (set via plugin settings):
     - clipper_api_url: Base URL of the Clipper API (e.g., http://localhost:5000)
-    - clipper_api_key: API key for authenticating with Clipper
-    - webhook_enabled: Whether to use webhooks for async clip delivery
-    - auto_save_clips: Automatically save returned clips as memories
+    - clipper_api_key: API key for authenticating with Clipper (starts with 'clipper_')
+    - auto_save_clips: Automatically save returned clips to library
+    - poll_interval: Seconds between job status polls (default: 4)
     """
     
-    DEFAULT_CLIPPER_URL = "http://localhost:5000"
+    DEFAULT_CLIPPER_URL = "https://clippy.up.railway.app"
+    DEFAULT_POLL_INTERVAL = 4  # seconds
     
     def __init__(self, api: Any):
         self.api = api
         self.api.log("info", "Clippy Integration plugin initialized")
+        # Cache for health check data
+        self._health_cache: dict | None = None
+        self._health_cache_time: float = 0
     
     async def on_load(self) -> None:
-        """Load plugin settings from config."""
-        # Settings are loaded from plugin config (set via Settings UI)
+        """Load plugin settings and perform health check."""
         api_url = self.api.get_config("clipper_api_url", self.DEFAULT_CLIPPER_URL)
         api_key = self.api.get_config("clipper_api_key", "")
-        auto_save = self.api.get_config("auto_save_clips", True)
         
         self.api.log("info", f"Clippy Integration loaded - API URL: {api_url}")
+        
         if not api_key:
             self.api.log("warning", "Clipper API key not configured. Go to Settings > Plugins > Clippy to set it up.")
+            return
+        
+        # Perform health check on load
+        try:
+            health = await self._check_health()
+            if health.get("success"):
+                account = health.get("account", {})
+                self.api.log("info", f"Connected to Clipper - Balance: {account.get('creditBalance', 0)} credits")
+            else:
+                self.api.log("warning", f"Clipper health check failed: {health.get('error', 'Unknown error')}")
+        except Exception as e:
+            self.api.log("warning", f"Could not connect to Clipper: {e}")
     
     async def on_unload(self) -> None:
         """Cleanup on unload."""
@@ -115,13 +136,39 @@ class Plugin:
             },
             {
                 "name": "clippy_status",
-                "description": "Check the current Clippy integration configuration status. Shows if API key is configured and the current API URL. Settings are managed via Settings > Plugins > Clippy Video Clipper.",
+                "description": "Check the current Clippy integration status including connection health, credit balance, and available features. Use this to verify the connection before generating clips.",
                 "parameters": {
                     "type": "object",
-                    "properties": {},
+                    "properties": {
+                        "refresh": {
+                            "type": "boolean",
+                            "description": "Force refresh the health check (bypass cache)",
+                            "default": False
+                        }
+                    },
                     "required": []
                 },
-                "handler": self.configure_handler
+                "handler": self.status_handler
+            },
+            {
+                "name": "clippy_wait_for_job",
+                "description": "Wait for a clip generation job to complete by polling its status. Returns the completed clips when done. Use this after clippy_create_clips returns a job_id.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "job_id": {
+                            "type": "string",
+                            "description": "The job ID returned from clippy_create_clips"
+                        },
+                        "max_wait_seconds": {
+                            "type": "number",
+                            "description": "Maximum seconds to wait for completion (default: 300 = 5 minutes)",
+                            "default": 300
+                        }
+                    },
+                    "required": ["job_id"]
+                },
+                "handler": self.wait_for_job_handler
             }
         ]
     
@@ -172,19 +219,64 @@ class Plugin:
                 timeout=120.0  # Video processing can take time
             )
             
-            if response["status_code"] == 401:
-                return {"success": False, "error": "Invalid Clipper API key"}
+            status_code = response["status_code"]
             
-            if response["status_code"] == 404:
+            if status_code == 401:
+                return {
+                    "success": False,
+                    "error": "Invalid or expired Clipper API key. Please re-enter your API key in Settings > Plugins > Clippy."
+                }
+            
+            if status_code == 402:
+                # Insufficient credits
+                try:
+                    error_data = json.loads(response["body"])
+                    return {
+                        "success": False,
+                        "error": "insufficient_credits",
+                        "message": error_data.get("message", "You need more Clipper credits to generate clips."),
+                        "required": error_data.get("required", 100),
+                        "balance": error_data.get("balance", 0),
+                        "purchase_url": error_data.get("purchaseUrl", "/settings?tab=credits")
+                    }
+                except:
+                    return {
+                        "success": False,
+                        "error": "insufficient_credits",
+                        "message": "You need more Clipper credits to generate clips."
+                    }
+            
+            if status_code == 403:
+                return {
+                    "success": False,
+                    "error": "Your API key is missing the 'clippy_agent' permission. Please regenerate your key with the correct permissions."
+                }
+            
+            if status_code == 404:
                 return {
                     "success": False,
                     "error": "Clippy endpoint not found. Make sure Clipper has the /api/v1/clippy/generate endpoint enabled."
                 }
             
-            if response["status_code"] != 200 and response["status_code"] != 202:
+            if status_code == 429:
+                # Parse retry-after from response
+                retry_after = 30  # default
+                try:
+                    error_data = json.loads(response["body"])
+                    retry_after = error_data.get("retryAfter", 30)
+                except:
+                    pass
                 return {
                     "success": False,
-                    "error": f"Clipper API error: {response['status_code']} - {response.get('body', '')}"
+                    "error": "rate_limited",
+                    "message": f"Rate limited. Please wait {retry_after} seconds and try again.",
+                    "retry_after": retry_after
+                }
+            
+            if status_code != 200 and status_code != 202:
+                return {
+                    "success": False,
+                    "error": f"Clipper API error: {status_code} - {response.get('body', '')}"
                 }
             
             result = json.loads(response["body"])
@@ -320,25 +412,216 @@ class Plugin:
             self.api.log("error", f"Get clip error: {e}")
             return {"success": False, "error": str(e)}
     
-    async def configure_handler(self, params: dict) -> dict:
-        """Show current Clippy configuration status.
-        
-        Settings are now managed via the Plugin Settings UI.
-        Go to Settings > Plugins > Clippy Video Clipper to configure.
+    async def status_handler(self, params: dict) -> dict:
         """
+        Check Clippy integration status with full health check.
+        
+        Returns connection status, credit balance, and available features.
+        """
+        refresh = params.get("refresh", False)
+        
         api_url = self.api.get_config("clipper_api_url", self.DEFAULT_CLIPPER_URL)
         api_key = self.api.get_config("clipper_api_key", "")
         auto_save = self.api.get_config("auto_save_clips", True)
         
+        if not api_key:
+            return {
+                "success": False,
+                "error": "Clipper API key not configured. Go to Settings > Plugins > Clippy to set it up.",
+                "result": {
+                    "connected": False,
+                    "api_url": api_url,
+                    "api_key_configured": False
+                }
+            }
+        
+        # Perform health check
+        health = await self._check_health(force_refresh=refresh)
+        
+        if not health.get("success"):
+            return {
+                "success": False,
+                "error": health.get("error", "Failed to connect to Clipper"),
+                "result": {
+                    "connected": False,
+                    "api_url": api_url,
+                    "api_key_configured": True
+                }
+            }
+        
+        account = health.get("account", {})
+        features = health.get("features", {})
+        api_key_info = health.get("apiKey", {})
+        
         return {
             "success": True,
             "result": {
-                "message": "Clippy settings are managed via Settings > Plugins > Clippy Video Clipper",
-                "current_api_url": api_url,
-                "api_key_configured": bool(api_key),
-                "auto_save_clips": auto_save
+                "connected": True,
+                "api_url": api_url,
+                "api_key_configured": True,
+                "api_key_name": api_key_info.get("name", "Unknown"),
+                "auto_save_clips": auto_save,
+                "account": {
+                    "credit_balance": account.get("creditBalance", 0),
+                    "minimum_required": account.get("minimumRequired", 100),
+                    "can_generate_clips": account.get("canGenerateClips", False)
+                },
+                "features": {
+                    "platforms": features.get("platforms", []),
+                    "max_clips": features.get("maxClips", 10),
+                    "include_captions": features.get("includeCaptions", True),
+                    "webhooks": features.get("webhooks", False)
+                },
+                "service_version": health.get("version", "unknown")
             }
         }
+    
+    async def wait_for_job_handler(self, params: dict) -> dict:
+        """
+        Wait for a clip generation job to complete by polling.
+        
+        Polls the job status every few seconds until completion or timeout.
+        """
+        job_id = params.get("job_id", "")
+        max_wait = min(params.get("max_wait_seconds", 300), 600)  # Cap at 10 minutes
+        
+        if not job_id:
+            return {"success": False, "error": "job_id is required"}
+        
+        api_key = self.api.get_config("clipper_api_key", "")
+        if not api_key:
+            return {"success": False, "error": "Clipper API key not configured"}
+        
+        api_url = self.api.get_config("clipper_api_url", self.DEFAULT_CLIPPER_URL)
+        poll_interval = self.api.get_config("poll_interval", self.DEFAULT_POLL_INTERVAL)
+        
+        start_time = asyncio.get_event_loop().time()
+        last_progress = -1
+        
+        while True:
+            elapsed = asyncio.get_event_loop().time() - start_time
+            if elapsed > max_wait:
+                return {
+                    "success": False,
+                    "error": f"Timeout waiting for job {job_id} after {max_wait} seconds",
+                    "result": {
+                        "job_id": job_id,
+                        "status": "timeout",
+                        "elapsed_seconds": int(elapsed)
+                    }
+                }
+            
+            try:
+                response = await self.api.http_request(
+                    method="GET",
+                    url=f"{api_url}/api/v1/clippy/jobs/{job_id}",
+                    headers={"Authorization": f"Bearer {api_key}"},
+                    timeout=30.0
+                )
+                
+                if response["status_code"] == 404:
+                    return {"success": False, "error": f"Job {job_id} not found"}
+                
+                if response["status_code"] != 200:
+                    return {"success": False, "error": f"Failed to get job status: {response['status_code']}"}
+                
+                result = json.loads(response["body"])
+                status = result.get("status", "unknown")
+                progress = result.get("progress", 0)
+                
+                # Log progress updates
+                if progress != last_progress:
+                    self.api.log("info", f"Job {job_id}: {status} ({progress}%)")
+                    last_progress = progress
+                
+                if status == "completed":
+                    clips = result.get("clips", [])
+                    
+                    # Auto-save clips if enabled
+                    if clips and self.api.get_config("auto_save_clips", True):
+                        await self._save_clips_as_memories(
+                            clips,
+                            result.get("videoUrl", ""),
+                            result.get("prompt", ""),
+                            job_id
+                        )
+                    
+                    return {
+                        "success": True,
+                        "result": {
+                            "job_id": job_id,
+                            "status": "completed",
+                            "progress": 100,
+                            "elapsed_seconds": int(elapsed),
+                            "clips_count": len(clips),
+                            "clips": clips
+                        }
+                    }
+                
+                if status == "failed":
+                    return {
+                        "success": False,
+                        "error": result.get("error", "Job failed"),
+                        "result": {
+                            "job_id": job_id,
+                            "status": "failed",
+                            "elapsed_seconds": int(elapsed)
+                        }
+                    }
+                
+                # Still processing, wait and poll again
+                await asyncio.sleep(poll_interval)
+                
+            except Exception as e:
+                self.api.log("error", f"Error polling job {job_id}: {e}")
+                return {"success": False, "error": str(e)}
+    
+    async def _check_health(self, force_refresh: bool = False) -> dict:
+        """
+        Check Clipper API health and get account info.
+        
+        Caches the result for 60 seconds to avoid excessive API calls.
+        """
+        import time
+        
+        # Return cached result if fresh (within 60 seconds)
+        if not force_refresh and self._health_cache:
+            if time.time() - self._health_cache_time < 60:
+                return self._health_cache
+        
+        api_key = self.api.get_config("clipper_api_key", "")
+        if not api_key:
+            return {"success": False, "error": "API key not configured"}
+        
+        api_url = self.api.get_config("clipper_api_url", self.DEFAULT_CLIPPER_URL)
+        
+        try:
+            response = await self.api.http_request(
+                method="GET",
+                url=f"{api_url}/api/v1/clippy/health",
+                headers={"Authorization": f"Bearer {api_key}"},
+                timeout=10.0
+            )
+            
+            if response["status_code"] == 401:
+                return {"success": False, "error": "Invalid or expired API key"}
+            
+            if response["status_code"] == 403:
+                return {"success": False, "error": "API key missing required permissions"}
+            
+            if response["status_code"] != 200:
+                return {"success": False, "error": f"Health check failed: {response['status_code']}"}
+            
+            result = json.loads(response["body"])
+            
+            # Cache the successful result
+            self._health_cache = result
+            self._health_cache_time = time.time()
+            
+            return result
+            
+        except Exception as e:
+            return {"success": False, "error": str(e)}
     
     async def _save_clips_as_memories(
         self,

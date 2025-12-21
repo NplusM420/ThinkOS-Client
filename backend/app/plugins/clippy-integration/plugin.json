@@ -1,8 +1,8 @@
 {
   "id": "clippy-integration",
   "name": "Clippy Video Clipper",
-  "version": "1.0.0",
-  "description": "Integrates with the Clipper platform to create video clips using the Clippy AI agent. Send video URLs and prompts to get back clips with captions and preferred aspect ratios.",
+  "version": "1.1.0",
+  "description": "Integrates with the Clipper platform to create video clips using the Clippy AI agent. Send video URLs and prompts to get back clips with captions and preferred aspect ratios. Supports credit balance tracking, job polling, and automatic clip saving.",
   "type": "integration",
   "author": {
     "name": "AI Layer Labs",
@@ -17,12 +17,40 @@
     "write_settings"
   ],
   "python_dependencies": [],
-  "keywords": ["video", "clips", "clipper", "clippy", "ai", "captions"],
+  "keywords": ["video", "clips", "clipper", "clippy", "ai", "captions", "tiktok", "youtube", "instagram"],
   "min_thinkos_version": "0.5.0",
   "homepage": "https://github.com/ThinkFoundation/ThinkOS-Client",
   "default_settings": {
-    "clipper_api_url": "http://localhost:5000",
+    "clipper_api_url": "https://clippy.up.railway.app",
     "clipper_api_key": "",
-    "auto_save_clips": true
+    "auto_save_clips": true,
+    "poll_interval": 4
+  },
+  "settings_schema": {
+    "clipper_api_url": {
+      "type": "string",
+      "label": "Clipper API URL",
+      "description": "Base URL of the Clipper platform API",
+      "placeholder": "https://clippy.up.railway.app"
+    },
+    "clipper_api_key": {
+      "type": "password",
+      "label": "API Key",
+      "description": "Your Clipper API key (starts with 'clipper_')",
+      "placeholder": "clipper_..."
+    },
+    "auto_save_clips": {
+      "type": "boolean",
+      "label": "Auto-save Clips",
+      "description": "Automatically save generated clips to your ThinkOS clips library"
+    },
+    "poll_interval": {
+      "type": "number",
+      "label": "Poll Interval (seconds)",
+      "description": "How often to check job status when waiting for clips",
+      "min": 2,
+      "max": 30,
+      "default": 4
+    }
   }
 }

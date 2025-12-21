@@ -17,7 +17,7 @@ import {
   ChevronDown,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { ClipCard, ClipDetailPanel } from "@/components/clips";
+import { ClipCard, ClipDetailPanel, ClipperStatus } from "@/components/clips";
 import * as clipsApi from "@/lib/api/clips";
 import type { VideoClip, ClipStats, ClipPlatform } from "@/types/clip";
 
@@ -202,6 +202,9 @@ export function ClipsPage() {
             </Button>
           </div>
         </div>
+
+        {/* Clipper connection status */}
+        <ClipperStatus className="mt-3" />
 
         {/* Filters */}
         <div className="flex flex-wrap items-center gap-3">

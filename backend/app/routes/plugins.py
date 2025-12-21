@@ -293,6 +293,85 @@ async def get_plugin_providers(plugin_id: str):
     }
 
 
+class ToolInvokeRequest(BaseModel):
+    """Request to invoke a plugin tool."""
+    params: dict[str, Any] = {}
+
+
+class ToolInvokeResponse(BaseModel):
+    """Response from invoking a plugin tool."""
+    success: bool
+    result: dict[str, Any] | None = None
+    error: str | None = None
+
+
+@router.post("/{plugin_id}/tools/{tool_name}", response_model=ToolInvokeResponse)
+async def invoke_plugin_tool(plugin_id: str, tool_name: str, request: ToolInvokeRequest):
+    """Invoke a specific tool from a plugin.
+    
+    This allows the frontend to directly call plugin tools without going through
+    the agent system. Useful for status checks, configuration, etc.
+    """
+    manager = get_plugin_manager()
+    
+    loader = manager.get_loaded_plugin(plugin_id)
+    if not loader:
+        raise HTTPException(status_code=404, detail=f"Plugin not loaded: {plugin_id}")
+    
+    # Find the tool
+    tool = None
+    for t in loader.tools:
+        if t.name == tool_name:
+            tool = t
+            break
+    
+    if not tool:
+        raise HTTPException(status_code=404, detail=f"Tool not found: {tool_name}")
+    
+    try:
+        # Get the handler from the plugin instance
+        plugin_instance = loader.instance
+        if not plugin_instance:
+            raise HTTPException(status_code=500, detail="Plugin instance not available")
+        
+        # Find the handler method
+        handler = None
+        if hasattr(plugin_instance, 'register_tools'):
+            tools = plugin_instance.register_tools()
+            for t in tools:
+                if t.get('name') == tool_name:
+                    handler = t.get('handler')
+                    break
+        
+        if not handler:
+            raise HTTPException(status_code=500, detail=f"Handler not found for tool: {tool_name}")
+        
+        # Invoke the handler
+        import asyncio
+        if asyncio.iscoroutinefunction(handler):
+            result = await handler(request.params)
+        else:
+            result = handler(request.params)
+        
+        # Handle the response format
+        if isinstance(result, dict):
+            success = result.get('success', True)
+            error = result.get('error') if not success else None
+            return ToolInvokeResponse(
+                success=success,
+                result=result.get('result', result),
+                error=error,
+            )
+        
+        return ToolInvokeResponse(success=True, result={"data": result})
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"Failed to invoke tool {tool_name}: {e}")
+        return ToolInvokeResponse(success=False, error=str(e))
+
+
 @router.post("/{plugin_id}/reload", response_model=PluginInfo)
 async def reload_plugin(plugin_id: str):
     """Reload a plugin (unload and load again)."""
