@@ -6,7 +6,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from .. import models as db_models
-from ..models.tool import ToolDefinition, ToolCategory, ToolHandler
+from ..models.tool import ToolDefinition, ToolCategory, ToolHandler, ToolParameter, ToolPermission
 
 
 class ToolRegistry:
@@ -23,6 +23,7 @@ class ToolRegistry:
     def __init__(self):
         self._handlers: dict[str, ToolHandler] = {}
         self._definitions: dict[str, ToolDefinition] = {}
+        self._plugin_tools: dict[str, str] = {}  # tool_id -> plugin_id mapping
     
     def register(
         self,
@@ -135,6 +136,127 @@ class ToolRegistry:
                 db.add(db_tool)
         
         db.commit()
+    
+    def register_plugin_tool(
+        self,
+        plugin_tool: Any,
+        handler: ToolHandler | None = None,
+    ) -> None:
+        """
+        Register a tool provided by a plugin.
+        
+        Args:
+            plugin_tool: PluginToolDefinition from the plugin
+            handler: Async function that executes the tool
+        """
+        # Convert plugin tool definition to standard ToolDefinition
+        tool_id = f"plugin.{plugin_tool.plugin_id}.{plugin_tool.name}"
+        
+        # Parse parameters from plugin format
+        parameters: list[ToolParameter] = []
+        if plugin_tool.parameters:
+            props = plugin_tool.parameters.get("properties", {})
+            required = plugin_tool.parameters.get("required", [])
+            for param_name, param_def in props.items():
+                parameters.append(ToolParameter(
+                    name=param_name,
+                    type=param_def.get("type", "string"),
+                    description=param_def.get("description", ""),
+                    required=param_name in required,
+                    default=param_def.get("default"),
+                    enum=param_def.get("enum"),
+                ))
+        
+        definition = ToolDefinition(
+            id=tool_id,
+            name=plugin_tool.name,
+            description=plugin_tool.description,
+            category=ToolCategory.CUSTOM,
+            parameters=parameters,
+            permissions=[],
+            is_builtin=False,
+            is_enabled=True,
+        )
+        
+        self._definitions[tool_id] = definition
+        self._plugin_tools[tool_id] = plugin_tool.plugin_id
+        
+        if handler:
+            self._handlers[tool_id] = handler
+    
+    def unregister_plugin_tool(self, tool_name: str) -> None:
+        """
+        Unregister a plugin-provided tool.
+        
+        Args:
+            tool_name: The tool name (will be prefixed with plugin.{plugin_id}.)
+        """
+        # Find and remove tools matching this name
+        tools_to_remove = [
+            tool_id for tool_id in self._definitions
+            if tool_id.endswith(f".{tool_name}") and tool_id in self._plugin_tools
+        ]
+        
+        for tool_id in tools_to_remove:
+            del self._definitions[tool_id]
+            if tool_id in self._handlers:
+                del self._handlers[tool_id]
+            if tool_id in self._plugin_tools:
+                del self._plugin_tools[tool_id]
+    
+    def unregister_plugin_tools(self, plugin_id: str) -> None:
+        """
+        Unregister all tools from a specific plugin.
+        
+        Args:
+            plugin_id: The plugin ID to remove tools for
+        """
+        tools_to_remove = [
+            tool_id for tool_id, pid in self._plugin_tools.items()
+            if pid == plugin_id
+        ]
+        
+        for tool_id in tools_to_remove:
+            del self._definitions[tool_id]
+            if tool_id in self._handlers:
+                del self._handlers[tool_id]
+            del self._plugin_tools[tool_id]
+    
+    def get_plugin_tools(self, plugin_id: str) -> list[ToolDefinition]:
+        """
+        Get all tools registered by a specific plugin.
+        
+        Args:
+            plugin_id: The plugin ID to get tools for
+        """
+        return [
+            self._definitions[tool_id]
+            for tool_id, pid in self._plugin_tools.items()
+            if pid == plugin_id
+        ]
+    
+    def get_handler(self, tool_name: str) -> ToolHandler | None:
+        """
+        Get the handler for a tool by name.
+        
+        Searches both by full tool_id and by short name for plugin tools.
+        
+        Args:
+            tool_name: The tool name (can be full ID or short name)
+            
+        Returns:
+            The tool handler function or None if not found
+        """
+        # First try exact match
+        if tool_name in self._handlers:
+            return self._handlers[tool_name]
+        
+        # For plugin tools, try matching by short name
+        for tool_id, handler in self._handlers.items():
+            if tool_id.endswith(f".{tool_name}"):
+                return handler
+        
+        return None
 
 
 # Global registry instance

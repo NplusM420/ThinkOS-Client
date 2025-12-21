@@ -15,6 +15,7 @@ from .graph import router as graph_router
 from .plugins import router as plugins_router
 from .inbox import router as inbox_router
 from .websocket import router as websocket_router
+from .clips import router as clips_router
 
 router = APIRouter()
 router.include_router(auth_router)
@@ -32,3 +33,4 @@ router.include_router(graph_router)
 router.include_router(plugins_router)
 router.include_router(inbox_router)
 router.include_router(websocket_router)
+router.include_router(clips_router)

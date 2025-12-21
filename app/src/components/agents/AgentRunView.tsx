@@ -10,6 +10,9 @@ import {
   Loader2,
   StopCircle,
   Clock,
+  ListChecks,
+  ClipboardCheck,
+  RefreshCw,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAgentStore } from "@/stores/agentStore";
@@ -21,17 +24,23 @@ interface AgentRunViewProps {
 }
 
 const STEP_ICONS: Record<StepType, React.ReactNode> = {
+  planning: <ListChecks className="h-4 w-4" />,
   thinking: <Brain className="h-4 w-4" />,
   tool_call: <Wrench className="h-4 w-4" />,
   tool_result: <CheckCircle2 className="h-4 w-4" />,
+  evaluation: <ClipboardCheck className="h-4 w-4" />,
+  replanning: <RefreshCw className="h-4 w-4" />,
   response: <MessageSquare className="h-4 w-4" />,
   error: <XCircle className="h-4 w-4" />,
 };
 
 const STEP_COLORS: Record<StepType, string> = {
+  planning: "text-purple-500 bg-purple-500/10",
   thinking: "text-blue-500 bg-blue-500/10",
   tool_call: "text-amber-500 bg-amber-500/10",
   tool_result: "text-green-500 bg-green-500/10",
+  evaluation: "text-cyan-500 bg-cyan-500/10",
+  replanning: "text-orange-500 bg-orange-500/10",
   response: "text-primary bg-primary/10",
   error: "text-destructive bg-destructive/10",
 };
@@ -96,6 +105,27 @@ export function AgentRunView({ agent, onClose }: AgentRunViewProps) {
         </Button>
       </div>
       
+      {/* Plan progress indicator */}
+      {currentRun?.plan && (
+        <div className="px-4 py-3 border-b border-border/50 bg-purple-500/5">
+          <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center gap-2">
+              <ListChecks className="h-4 w-4 text-purple-500" />
+              <span className="text-sm font-medium">Plan: {currentRun.plan.goal}</span>
+            </div>
+            <span className="text-xs text-muted-foreground">
+              Step {currentRun.plan.current_step}/{currentRun.plan.total_steps}
+            </span>
+          </div>
+          <div className="w-full bg-muted rounded-full h-1.5">
+            <div
+              className="bg-purple-500 h-1.5 rounded-full transition-all duration-300"
+              style={{ width: `${currentRun.plan.progress_percent}%` }}
+            />
+          </div>
+        </div>
+      )}
+      
       {/* Steps timeline */}
       <div className="flex-1 overflow-y-auto p-4 space-y-3">
         {currentRun?.steps.map((step, index) => (
@@ -105,7 +135,11 @@ export function AgentRunView({ agent, onClose }: AgentRunViewProps) {
         {isRunning && (
           <div className="flex items-center gap-2 text-muted-foreground">
             <Loader2 className="h-4 w-4 animate-spin" />
-            <span className="text-sm">Agent is thinking...</span>
+            <span className="text-sm">
+              {currentRun?.plan 
+                ? `Working on step ${currentRun.plan.current_step + 1}...`
+                : "Agent is thinking..."}
+            </span>
           </div>
         )}
         

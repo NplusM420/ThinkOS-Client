@@ -1,0 +1,28 @@
+{
+  "id": "clippy-integration",
+  "name": "Clippy Video Clipper",
+  "version": "1.0.0",
+  "description": "Integrates with the Clipper platform to create video clips using the Clippy AI agent. Send video URLs and prompts to get back clips with captions and preferred aspect ratios.",
+  "type": "integration",
+  "author": {
+    "name": "AI Layer Labs",
+    "email": "dev@ailayerlabs.com",
+    "url": "https://ailayerlabs.com"
+  },
+  "main": "main.py",
+  "permissions": [
+    "network_access",
+    "write_memories",
+    "read_settings",
+    "write_settings"
+  ],
+  "python_dependencies": [],
+  "keywords": ["video", "clips", "clipper", "clippy", "ai", "captions"],
+  "min_thinkos_version": "0.5.0",
+  "homepage": "https://github.com/ThinkFoundation/ThinkOS-Client",
+  "default_settings": {
+    "clipper_api_url": "http://localhost:5000",
+    "clipper_api_key": "",
+    "auto_save_clips": true
+  }
+}

@@ -36,6 +36,8 @@ logging.getLogger("uvicorn.access").addFilter(EndpointFilter())
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    logger = logging.getLogger(__name__)
+    
     # Ensure Playwright browsers are installed (for web research)
     await ensure_playwright_installed()
     
@@ -43,11 +45,27 @@ async def lifespan(app: FastAPI):
     from .tools import register_all_builtin_tools
     register_all_builtin_tools()
     
+    # Load enabled plugins
+    from .services.plugin_manager import get_plugin_manager
+    plugin_manager = get_plugin_manager()
+    try:
+        await plugin_manager.load_enabled_plugins()
+        logger.info("Plugin system initialized")
+    except Exception as e:
+        logger.warning(f"Failed to load some plugins: {e}")
+    
     # Start native messaging socket server for secure extension communication
     from .native_messaging import start_native_messaging_server, stop_native_messaging_server
 
     await start_native_messaging_server()
     yield
+    
+    # Unload all plugins on shutdown
+    try:
+        await plugin_manager.unload_all_plugins()
+    except Exception as e:
+        logger.warning(f"Error unloading plugins: {e}")
+    
     await stop_native_messaging_server()
 
 

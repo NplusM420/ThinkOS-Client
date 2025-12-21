@@ -13,8 +13,10 @@ from ..models.agent import (
     AgentRunRequest,
     AgentRunResponse,
     AgentStatus,
+    EnhancedAgentRunResponse,
+    StepType,
 )
-from ..services.agent_executor import AgentExecutor
+from ..services.enhanced_agent_executor import EnhancedAgentExecutor
 
 router = APIRouter(prefix="/api/agents", tags=["agents"])
 
@@ -182,13 +184,31 @@ async def delete_agent(
     return {"message": f"Agent {agent_id} deleted"}
 
 
-@router.post("/{agent_id}/run", response_model=AgentRunResponse)
+@router.post("/{agent_id}/run", response_model=EnhancedAgentRunResponse)
 async def run_agent(
     agent_id: int,
     request: AgentRunRequest,
+    enable_planning: bool = True,
     db: Session = Depends(get_db),
 ):
-    """Run an agent with the given input."""
+    """Run an agent with the given input.
+    
+    All agents now use enhanced orchestration with:
+    - Explicit task decomposition and planning
+    - Step-by-step execution with progress tracking  
+    - Self-evaluation after each step
+    - Adaptive replanning when needed
+    - Error recovery with retry strategies
+    
+    Args:
+        agent_id: The agent to run
+        request: The run request with input and optional context
+        enable_planning: If True (default), create explicit task plan before execution.
+                        Set to False for simple tasks that don't need planning overhead.
+    
+    Returns:
+        EnhancedAgentRunResponse with execution results, plan details, and evaluations
+    """
     agent = db.query(db_models.Agent).filter(db_models.Agent.id == agent_id).first()
     
     if not agent:
@@ -197,7 +217,7 @@ async def run_agent(
     if not agent.is_enabled:
         raise HTTPException(status_code=400, detail=f"Agent {agent_id} is disabled")
     
-    executor = AgentExecutor(db)
+    executor = EnhancedAgentExecutor(db, enable_planning=enable_planning)
     result = await executor.run(agent, request.input, request.context)
     
     return result
@@ -254,7 +274,7 @@ async def get_run(
     if not run:
         raise HTTPException(status_code=404, detail=f"Run {run_id} not found")
     
-    from ..models.agent import AgentRunStepResponse, StepType
+    from ..models.agent import AgentRunStepResponse
     
     steps = [
         AgentRunStepResponse(
@@ -295,7 +315,15 @@ async def run_agent_streaming(
     agent_id: int,
     db: Session = Depends(get_db),
 ):
-    """Run an agent with WebSocket streaming of steps."""
+    """Run an agent with WebSocket streaming of steps.
+    
+    All agents use enhanced orchestration with planning and self-evaluation.
+    
+    Send JSON with:
+    - input: The task/prompt
+    - context: Optional additional context
+    - enable_planning: If false, skip explicit planning phase (default: true)
+    """
     await websocket.accept()
     
     try:
@@ -315,7 +343,8 @@ async def run_agent_streaming(
             await websocket.close()
             return
         
-        executor = AgentExecutor(db)
+        enable_planning = data.get("enable_planning", True)
+        executor = EnhancedAgentExecutor(db, enable_planning=enable_planning)
         
         async for event in executor.run_streaming(agent, input_text, context):
             await websocket.send_json(event.model_dump(mode="json"))

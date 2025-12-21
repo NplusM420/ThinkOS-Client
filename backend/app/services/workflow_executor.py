@@ -22,7 +22,7 @@ from ..models.workflow import (
     WorkflowStreamEvent,
     ApprovalRequest,
 )
-from .agent_executor import AgentExecutor
+from .enhanced_agent_executor import EnhancedAgentExecutor
 from .tool_executor import ToolExecutor
 
 logger = logging.getLogger(__name__)
@@ -45,7 +45,7 @@ class WorkflowExecutor:
     
     def __init__(self, db: Session):
         self.db = db
-        self.agent_executor = AgentExecutor(db)
+        self.agent_executor = EnhancedAgentExecutor(db, enable_planning=True)
         self.tool_executor = ToolExecutor(db)
         self._pending_approvals: dict[int, asyncio.Event] = {}
         self._approval_results: dict[int, bool] = {}

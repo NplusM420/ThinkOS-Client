@@ -18,11 +18,23 @@ class AgentStatus(str, Enum):
 
 class StepType(str, Enum):
     """Type of step in an agent run."""
+    PLANNING = "planning"
     THINKING = "thinking"
     TOOL_CALL = "tool_call"
     TOOL_RESULT = "tool_result"
+    EVALUATION = "evaluation"
+    REPLANNING = "replanning"
     RESPONSE = "response"
     ERROR = "error"
+
+
+class PlanStepStatus(str, Enum):
+    """Status of a plan step."""
+    PENDING = "pending"
+    IN_PROGRESS = "in_progress"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    SKIPPED = "skipped"
 
 
 class AgentDefinition(BaseModel):
@@ -106,8 +118,81 @@ class AgentRunResponse(BaseModel):
 class AgentRunStreamEvent(BaseModel):
     """WebSocket event for streaming agent run updates."""
     run_id: int
-    event_type: str  # "step", "complete", "error"
+    event_type: str  # "plan", "step", "evaluation", "complete", "error"
     step: AgentRunStepResponse | None = None
+    plan: "AgentPlanResponse | None" = None
     output: str | None = None
     error: str | None = None
     status: AgentStatus | None = None
+
+
+# ============================================================================
+# Enhanced Agent Orchestration Models
+# ============================================================================
+
+class PlanStepDefinition(BaseModel):
+    """Definition of a single step in an agent's plan."""
+    step_number: int
+    description: str
+    reasoning: str | None = None
+    expected_tools: list[str] = Field(default_factory=list)
+    success_criteria: str | None = None
+    status: PlanStepStatus = PlanStepStatus.PENDING
+    result: str | None = None
+    error: str | None = None
+
+
+class AgentPlan(BaseModel):
+    """A structured plan for completing a task."""
+    goal: str
+    approach: str
+    steps: list[PlanStepDefinition]
+    current_step: int = 0
+    total_steps: int = 0
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+    
+    def model_post_init(self, __context: Any) -> None:
+        self.total_steps = len(self.steps)
+
+
+class AgentPlanResponse(BaseModel):
+    """Response model for agent plan."""
+    goal: str
+    approach: str
+    steps: list[PlanStepDefinition]
+    current_step: int
+    total_steps: int
+    progress_percent: float = 0.0
+
+
+class ThinkingBlock(BaseModel):
+    """Structured thinking block for agent reasoning."""
+    context: str | None = None
+    analysis: str | None = None
+    decision: str | None = None
+    next_action: str | None = None
+
+
+class EvaluationResult(BaseModel):
+    """Result of self-evaluation after a step."""
+    step_successful: bool
+    goal_progress: float = Field(ge=0.0, le=1.0, description="Progress toward goal (0-1)")
+    reasoning: str
+    should_continue: bool = True
+    needs_replanning: bool = False
+    suggested_changes: str | None = None
+
+
+class RetryStrategy(BaseModel):
+    """Strategy for retrying failed operations."""
+    max_retries: int = 3
+    current_retry: int = 0
+    backoff_seconds: float = 1.0
+    should_replan_on_failure: bool = True
+
+
+class EnhancedAgentRunResponse(AgentRunResponse):
+    """Extended response with plan information."""
+    plan: AgentPlanResponse | None = None
+    evaluations: list[EvaluationResult] = Field(default_factory=list)

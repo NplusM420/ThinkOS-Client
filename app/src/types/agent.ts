@@ -65,7 +65,17 @@ export interface ToolExecutionResult {
 
 export type AgentStatus = "pending" | "running" | "completed" | "failed" | "cancelled";
 
-export type StepType = "thinking" | "tool_call" | "tool_result" | "response" | "error";
+export type StepType = 
+  | "planning"
+  | "thinking"
+  | "tool_call"
+  | "tool_result"
+  | "evaluation"
+  | "replanning"
+  | "response"
+  | "error";
+
+export type PlanStepStatus = "pending" | "in_progress" | "completed" | "failed" | "skipped";
 
 export interface AgentDefinition {
   id: number;
@@ -137,14 +147,52 @@ export interface AgentRunResponse {
   started_at?: string;
   completed_at?: string;
   steps: AgentRunStep[];
+  // Enhanced orchestration fields (optional for backward compatibility)
+  plan?: AgentPlanResponse;
+  evaluations?: EvaluationResult[];
 }
 
 export interface AgentRunStreamEvent {
-  event_type: "step" | "complete" | "error";
+  event_type: "plan" | "step" | "evaluation" | "complete" | "error";
   run_id: number;
   step?: AgentRunStep;
-  final_output?: string;
+  plan?: AgentPlanResponse;
+  output?: string;
   error?: string;
+  status?: AgentStatus;
+}
+
+// ============================================================================
+// Enhanced Agent Orchestration Types
+// ============================================================================
+
+export interface PlanStepDefinition {
+  step_number: number;
+  description: string;
+  reasoning?: string;
+  expected_tools: string[];
+  success_criteria?: string;
+  status: PlanStepStatus;
+  result?: string;
+  error?: string;
+}
+
+export interface AgentPlanResponse {
+  goal: string;
+  approach: string;
+  steps: PlanStepDefinition[];
+  current_step: number;
+  total_steps: number;
+  progress_percent: number;
+}
+
+export interface EvaluationResult {
+  step_successful: boolean;
+  goal_progress: number;
+  reasoning: string;
+  should_continue: boolean;
+  needs_replanning: boolean;
+  suggested_changes?: string;
 }
 
 // ============================================================================

@@ -1,0 +1,18 @@
+{
+  "id": "weather-tool",
+  "name": "Weather Tool",
+  "version": "1.0.0",
+  "description": "Provides weather information tools for agents. Demonstrates network access and external API integration.",
+  "type": "tool",
+  "author": {
+    "name": "ThinkOS Team",
+    "email": "hello@thinkos.dev"
+  },
+  "main": "main.py",
+  "permissions": [
+    "network_access"
+  ],
+  "python_dependencies": [],
+  "keywords": ["weather", "api", "network"],
+  "min_thinkos_version": "0.5.0"
+}

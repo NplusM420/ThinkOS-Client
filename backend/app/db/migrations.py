@@ -968,6 +968,152 @@ I challenge to strengthen, not to discourage. A well-tested idea is a stronger i
         """), agent)
 
 
+@migration(30, "Add enhanced agent orchestration tables")
+def migration_030(conn: Connection) -> None:
+    """Create tables for enhanced agent orchestration with planning and evaluation."""
+    
+    # Add new columns to agent_run_steps for enhanced orchestration
+    result = conn.execute(text("PRAGMA table_info(agent_run_steps)")).fetchall()
+    columns = [row[1] for row in result]
+    
+    if "plan_step_number" not in columns:
+        conn.execute(text("ALTER TABLE agent_run_steps ADD COLUMN plan_step_number INTEGER"))
+    if "thinking_block" not in columns:
+        conn.execute(text("ALTER TABLE agent_run_steps ADD COLUMN thinking_block TEXT"))
+    
+    # Create agent_run_plans table
+    result = conn.execute(text(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='agent_run_plans'"
+    )).fetchone()
+    
+    if not result:
+        conn.execute(text("""
+            CREATE TABLE agent_run_plans (
+                id INTEGER PRIMARY KEY,
+                run_id INTEGER NOT NULL UNIQUE,
+                goal TEXT NOT NULL,
+                approach TEXT NOT NULL,
+                current_step INTEGER DEFAULT 0,
+                total_steps INTEGER DEFAULT 0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (run_id) REFERENCES agent_runs(id) ON DELETE CASCADE
+            )
+        """))
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_agent_run_plans_run ON agent_run_plans(run_id)"
+        ))
+    
+    # Create agent_run_plan_steps table
+    result = conn.execute(text(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='agent_run_plan_steps'"
+    )).fetchone()
+    
+    if not result:
+        conn.execute(text("""
+            CREATE TABLE agent_run_plan_steps (
+                id INTEGER PRIMARY KEY,
+                plan_id INTEGER NOT NULL,
+                step_number INTEGER NOT NULL,
+                description TEXT NOT NULL,
+                reasoning TEXT,
+                expected_tools TEXT,
+                success_criteria TEXT,
+                status VARCHAR(20) DEFAULT 'pending',
+                result TEXT,
+                error TEXT,
+                started_at TIMESTAMP,
+                completed_at TIMESTAMP,
+                FOREIGN KEY (plan_id) REFERENCES agent_run_plans(id) ON DELETE CASCADE
+            )
+        """))
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_agent_run_plan_steps_plan ON agent_run_plan_steps(plan_id)"
+        ))
+    
+    # Create agent_run_evaluations table
+    result = conn.execute(text(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='agent_run_evaluations'"
+    )).fetchone()
+    
+    if not result:
+        conn.execute(text("""
+            CREATE TABLE agent_run_evaluations (
+                id INTEGER PRIMARY KEY,
+                run_id INTEGER NOT NULL,
+                plan_step_number INTEGER,
+                step_successful BOOLEAN NOT NULL,
+                goal_progress REAL NOT NULL,
+                reasoning TEXT NOT NULL,
+                should_continue BOOLEAN DEFAULT TRUE,
+                needs_replanning BOOLEAN DEFAULT FALSE,
+                suggested_changes TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (run_id) REFERENCES agent_runs(id) ON DELETE CASCADE
+            )
+        """))
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_agent_run_evaluations_run ON agent_run_evaluations(run_id)"
+        ))
+
+
+@migration(31, "Add video clips tables for Clippy integration")
+def migration_31_video_clips(conn: Connection) -> None:
+    """Add tables for storing video clips from Clippy."""
+    
+    # Video clips table
+    conn.execute(text("""
+        CREATE TABLE IF NOT EXISTS video_clips (
+            id INTEGER PRIMARY KEY,
+            title VARCHAR(500) NOT NULL,
+            description TEXT,
+            source_url TEXT NOT NULL,
+            source_title VARCHAR(500),
+            start_time REAL,
+            end_time REAL,
+            duration REAL,
+            thumbnail_url TEXT,
+            download_url TEXT,
+            preview_url TEXT,
+            aspect_ratio VARCHAR(20),
+            platform_recommendation VARCHAR(50),
+            captions TEXT,
+            prompt TEXT,
+            clippy_job_id VARCHAR(100),
+            clippy_clip_id VARCHAR(100),
+            is_favorite BOOLEAN DEFAULT FALSE,
+            is_archived BOOLEAN DEFAULT FALSE,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """))
+    
+    # Video clip tags junction table
+    conn.execute(text("""
+        CREATE TABLE IF NOT EXISTS video_clip_tags (
+            clip_id INTEGER NOT NULL,
+            tag_id INTEGER NOT NULL,
+            PRIMARY KEY (clip_id, tag_id),
+            FOREIGN KEY (clip_id) REFERENCES video_clips(id) ON DELETE CASCADE,
+            FOREIGN KEY (tag_id) REFERENCES tags(id) ON DELETE CASCADE
+        )
+    """))
+    
+    # Indexes for efficient querying
+    conn.execute(text(
+        "CREATE INDEX IF NOT EXISTS idx_video_clips_source ON video_clips(source_url)"
+    ))
+    conn.execute(text(
+        "CREATE INDEX IF NOT EXISTS idx_video_clips_created ON video_clips(created_at DESC)"
+    ))
+    conn.execute(text(
+        "CREATE INDEX IF NOT EXISTS idx_video_clips_favorite ON video_clips(is_favorite)"
+    ))
+    conn.execute(text(
+        "CREATE INDEX IF NOT EXISTS idx_video_clips_platform ON video_clips(platform_recommendation)"
+    ))
+
+
 # --- Migration runner ---
 
 def run_migrations(conn: Connection) -> list[tuple[int, str]]:

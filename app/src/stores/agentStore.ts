@@ -10,6 +10,7 @@ import type {
   AgentRunResponse,
   AgentRunStep,
   AgentRunStreamEvent,
+  AgentPlanResponse,
 } from "../types/agent";
 import * as agentsApi from "../lib/api/agents";
 import { getAppToken } from "../lib/api";
@@ -186,21 +187,53 @@ export const useAgentStore = create<AgentState>()((set, get) => ({
         try {
           const data: AgentRunStreamEvent = JSON.parse(event.data);
           
-          if (data.event_type === "step" && data.step) {
-            onStep?.(data.step);
+          // Helper to get or create current run
+          const getOrCreateRun = (state: AgentState): AgentRunResponse => {
+            return state.currentRun || {
+              id: data.run_id,
+              agent_id: agentId,
+              input,
+              status: "running" as const,
+              steps_completed: 0,
+              created_at: new Date().toISOString(),
+              steps: [],
+            };
+          };
+          
+          if (data.event_type === "plan" && data.plan) {
+            // Planning phase - store the plan and add planning step
             set((state) => {
-              const currentRun = state.currentRun || {
-                id: data.run_id,
-                agent_id: agentId,
-                input,
-                status: "running" as const,
-                steps_completed: 0,
-                created_at: new Date().toISOString(),
-                steps: [],
-              };
+              const currentRun = getOrCreateRun(state);
               return {
                 currentRun: {
                   ...currentRun,
+                  plan: data.plan,
+                  steps: data.step ? [...currentRun.steps, data.step] : currentRun.steps,
+                  steps_completed: data.step ? currentRun.steps_completed + 1 : currentRun.steps_completed,
+                },
+              };
+            });
+          } else if (data.event_type === "step" && data.step) {
+            onStep?.(data.step);
+            set((state) => {
+              const currentRun = getOrCreateRun(state);
+              return {
+                currentRun: {
+                  ...currentRun,
+                  plan: data.plan || currentRun.plan,
+                  steps: [...currentRun.steps, data.step!],
+                  steps_completed: currentRun.steps_completed + 1,
+                },
+              };
+            });
+          } else if (data.event_type === "evaluation" && data.step) {
+            // Evaluation step - update plan progress and add evaluation step
+            set((state) => {
+              const currentRun = getOrCreateRun(state);
+              return {
+                currentRun: {
+                  ...currentRun,
+                  plan: data.plan || currentRun.plan,
                   steps: [...currentRun.steps, data.step!],
                   steps_completed: currentRun.steps_completed + 1,
                 },
@@ -209,7 +242,12 @@ export const useAgentStore = create<AgentState>()((set, get) => ({
           } else if (data.event_type === "complete") {
             set((state) => ({
               currentRun: state.currentRun
-                ? { ...state.currentRun, status: "completed", output: data.final_output }
+                ? { 
+                    ...state.currentRun, 
+                    status: "completed", 
+                    output: data.output,
+                    plan: data.plan || state.currentRun.plan,
+                  }
                 : null,
               isRunning: false,
             }));

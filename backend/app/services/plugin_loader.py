@@ -27,6 +27,22 @@ class PluginAPI:
     def __init__(self, plugin_id: str, permissions: list[PluginPermission]):
         self._plugin_id = plugin_id
         self._permissions = set(permissions)
+        self._config_settings: dict[str, Any] = {}
+    
+    def _set_config_settings(self, settings: dict[str, Any]) -> None:
+        """Set the plugin's config settings (called by loader)."""
+        self._config_settings = settings.copy() if settings else {}
+    
+    def get_config(self, key: str, default: Any = None) -> Any:
+        """Get a plugin config setting value.
+        
+        These are the settings shown in the plugin settings UI.
+        """
+        return self._config_settings.get(key, default)
+    
+    def get_all_config(self) -> dict[str, Any]:
+        """Get all plugin config settings."""
+        return self._config_settings.copy()
     
     def _check_permission(self, permission: PluginPermission) -> None:
         """Check if the plugin has a required permission."""
@@ -95,6 +111,87 @@ class PluginAPI:
         query_embedding = await get_embedding(query)
         results = await search_similar_memories(query_embedding, limit=limit)
         return results
+    
+    async def save_video_clip(
+        self,
+        title: str,
+        source_url: str,
+        description: str | None = None,
+        source_title: str | None = None,
+        start_time: float | None = None,
+        end_time: float | None = None,
+        duration: float | None = None,
+        thumbnail_url: str | None = None,
+        download_url: str | None = None,
+        preview_url: str | None = None,
+        aspect_ratio: str | None = None,
+        platform_recommendation: str | None = None,
+        captions: str | None = None,
+        prompt: str | None = None,
+        clippy_job_id: str | None = None,
+        clippy_clip_id: str | None = None,
+        tags: list[str] | None = None,
+    ) -> dict:
+        """Save a video clip to the clips library.
+        
+        This is used by the Clippy integration to store generated clips.
+        """
+        self._check_permission(PluginPermission.WRITE_MEMORIES)
+        
+        from ..db.core import get_db
+        from .. import models as db_models
+        
+        # Get db session
+        db_gen = get_db()
+        db = next(db_gen)
+        
+        try:
+            clip = db_models.VideoClip(
+                title=title,
+                description=description,
+                source_url=source_url,
+                source_title=source_title,
+                start_time=start_time,
+                end_time=end_time,
+                duration=duration,
+                thumbnail_url=thumbnail_url,
+                download_url=download_url,
+                preview_url=preview_url,
+                aspect_ratio=aspect_ratio,
+                platform_recommendation=platform_recommendation,
+                captions=captions,
+                prompt=prompt,
+                clippy_job_id=clippy_job_id,
+                clippy_clip_id=clippy_clip_id,
+            )
+            
+            db.add(clip)
+            db.flush()
+            
+            # Add tags
+            if tags:
+                for tag_name in tags:
+                    tag = db.query(db_models.Tag).filter(
+                        db_models.Tag.name == tag_name
+                    ).first()
+                    if not tag:
+                        tag = db_models.Tag(name=tag_name)
+                        db.add(tag)
+                        db.flush()
+                    
+                    clip_tag = db_models.VideoClipTag(clip_id=clip.id, tag_id=tag.id)
+                    db.add(clip_tag)
+            
+            db.commit()
+            
+            return {
+                "id": clip.id,
+                "title": clip.title,
+                "source_url": clip.source_url,
+                "created_at": clip.created_at.isoformat(),
+            }
+        finally:
+            db.close()
     
     async def get_setting(self, key: str) -> str | None:
         """Get a setting value."""
@@ -203,15 +300,21 @@ class PluginLoader:
     def routes(self) -> list[PluginRouteDefinition]:
         return self._routes
     
-    async def load(self) -> None:
-        """Load the plugin module and execute onLoad hook."""
+    async def load(self, config_settings: dict[str, Any] | None = None) -> None:
+        """Load the plugin module and execute onLoad hook.
+        
+        Args:
+            config_settings: Plugin config settings from the plugin manager
+        """
         main_file = self._path / self._manifest.main
         
         if not main_file.exists():
             raise FileNotFoundError(f"Plugin main file not found: {main_file}")
         
-        # Create plugin API
+        # Create plugin API and inject config settings
         self._api = PluginAPI(self._manifest.id, self._manifest.permissions)
+        if config_settings:
+            self._api._set_config_settings(config_settings)
         
         # Load the module
         spec = importlib.util.spec_from_file_location(

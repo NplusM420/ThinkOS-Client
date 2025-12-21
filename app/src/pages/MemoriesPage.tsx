@@ -62,9 +62,12 @@ export default function MemoriesPage() {
   // Tags state (for autocomplete in dialog)
   const [allTags, setAllTags] = useState<Tag[]>([]);
 
-  // Detail panel state
-  const [selectedMemoryId, setSelectedMemoryId] = useState<number | null>(null);
-  const [isPanelOpen, setIsPanelOpen] = useState(false);
+  // Detail panel state - check for view param from URL
+  const viewParam = searchParams.get("view");
+  const [selectedMemoryId, setSelectedMemoryId] = useState<number | null>(
+    viewParam ? parseInt(viewParam, 10) : null
+  );
+  const [isPanelOpen, setIsPanelOpen] = useState(viewParam !== null);
 
   // Refs for infinite scroll
   const observerRef = useRef<IntersectionObserver | null>(null);

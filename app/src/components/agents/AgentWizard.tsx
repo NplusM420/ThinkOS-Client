@@ -214,14 +214,57 @@ export function AgentWizard({ onComplete, onCancel }: AgentWizardProps) {
     if (!description.trim()) return;
     
     setIsGenerating(true);
-    // TODO: Call LLM to generate system prompt from description
-    // For now, just enhance the default prompt
-    setTimeout(() => {
+    
+    try {
+      // Call the chat API to generate a system prompt
+      const response = await apiFetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          message: `Generate a detailed system prompt for an AI agent with the following characteristics:
+
+Name: ${name || "AI Assistant"}
+Description: ${description}
+Selected Tools: ${Array.from(selectedTools).join(", ") || "general tools"}
+
+Create a comprehensive system prompt that:
+1. Defines the agent's role and expertise
+2. Describes how it should approach tasks
+3. Specifies its communication style
+4. Includes guidelines for using tools effectively
+5. Sets appropriate boundaries and behaviors
+
+Output ONLY the system prompt text, no explanations or markdown formatting.`,
+          system_prompt: "You are an expert at writing system prompts for AI agents. Generate clear, detailed, and effective system prompts that define agent behavior precisely.",
+        }),
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        const generatedPrompt = data.response || data.message || "";
+        if (generatedPrompt) {
+          setSystemPrompt(generatedPrompt.trim());
+        } else {
+          // Fallback if no response
+          setSystemPrompt(
+            `You are ${name || "an AI assistant"}. ${description}\n\nYou have access to various tools to help accomplish tasks. Use them wisely and explain your reasoning as you work.`
+          );
+        }
+      } else {
+        // Fallback on error
+        setSystemPrompt(
+          `You are ${name || "an AI assistant"}. ${description}\n\nYou have access to various tools to help accomplish tasks. Use them wisely and explain your reasoning as you work.`
+        );
+      }
+    } catch (error) {
+      console.error("Failed to generate prompt:", error);
+      // Fallback on error
       setSystemPrompt(
         `You are ${name || "an AI assistant"}. ${description}\n\nYou have access to various tools to help accomplish tasks. Use them wisely and explain your reasoning as you work.`
       );
+    } finally {
       setIsGenerating(false);
-    }, 1000);
+    }
   };
   
   return (

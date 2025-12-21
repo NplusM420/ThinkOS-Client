@@ -1,6 +1,9 @@
 from typing import AsyncGenerator
 from openai import AsyncOpenAI
 from .. import config
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 # Custom system prompt for Think
@@ -36,6 +39,63 @@ When the user asks you to research, investigate, or look up information:
 Remember: You're not just an assistant—you're an extension of the user's thinking. Help them be smarter, more informed, and more productive."""
 
 
+def _get_active_plugin_tools() -> tuple[list[dict], str]:
+    """Get tools from active plugins and build a description for the system prompt.
+    
+    Returns:
+        tuple[list[dict], str]: (list of OpenAI function definitions, description text for system prompt)
+    """
+    try:
+        from .plugin_manager import get_plugin_manager
+        from .tool_registry import tool_registry
+        
+        manager = get_plugin_manager()
+        plugin_tools = []
+        plugin_descriptions = []
+        
+        # Get all loaded plugins and their tools
+        for plugin_id, loader in manager._loaded_plugins.items():
+            installation = manager._plugins.get(plugin_id)
+            if not installation or installation.status.value != "enabled":
+                continue
+            
+            for tool in loader.tools:
+                # Convert to OpenAI function format
+                plugin_tools.append({
+                    "type": "function",
+                    "function": {
+                        "name": tool.name,
+                        "description": tool.description,
+                        "parameters": tool.parameters,
+                    }
+                })
+                
+                plugin_descriptions.append(
+                    f"- **{tool.name}**: {tool.description}"
+                )
+        
+        if plugin_descriptions:
+            description_text = "\n\n## Plugin Capabilities\nYou have access to the following plugin tools:\n" + "\n".join(plugin_descriptions)
+            description_text += "\n\nUse these tools when the user's request matches their capabilities."
+        else:
+            description_text = ""
+        
+        return plugin_tools, description_text
+        
+    except Exception as e:
+        logger.warning(f"Failed to get plugin tools: {e}")
+        return [], ""
+
+
+def _build_enhanced_system_prompt(base_prompt: str) -> str:
+    """Build system prompt with plugin capabilities included."""
+    _, plugin_description = _get_active_plugin_tools()
+    
+    if plugin_description:
+        return base_prompt + plugin_description
+    return base_prompt
+
+
 async def get_client() -> AsyncOpenAI:
     """Get configured OpenAI client (works with Ollama and OpenAI-compatible services)."""
     from .secrets import get_api_key
@@ -63,6 +123,59 @@ async def get_client() -> AsyncOpenAI:
         )
 
 
+def get_ai_client(provider: str) -> AsyncOpenAI:
+    """Get an OpenAI-compatible client for a specific provider.
+    
+    This is a synchronous factory that returns a client configured for the provider.
+    Used by agent executors that need provider-specific clients.
+    
+    Args:
+        provider: The AI provider name (e.g., 'openai', 'ollama', 'openrouter')
+    """
+    from ..config import get_provider_base_url
+    import asyncio
+    
+    if provider == "ollama":
+        return AsyncOpenAI(
+            base_url=config.settings.ollama_base_url,
+            api_key="ollama",
+        )
+    
+    # For other providers, we need to get the API key
+    # This is a sync wrapper - the actual key retrieval happens at call time
+    base_url = get_provider_base_url(provider)
+    
+    # Create client with placeholder - actual auth happens via default_headers or per-request
+    return AsyncOpenAI(
+        base_url=base_url,
+        api_key="placeholder",  # Will be set properly when making requests
+    )
+
+
+async def get_ai_client_async(provider: str) -> AsyncOpenAI:
+    """Get an OpenAI-compatible client for a specific provider (async version).
+    
+    Args:
+        provider: The AI provider name (e.g., 'openai', 'ollama', 'openrouter')
+    """
+    from .secrets import get_api_key
+    from ..config import get_provider_base_url
+    
+    if provider == "ollama":
+        return AsyncOpenAI(
+            base_url=config.settings.ollama_base_url,
+            api_key="ollama",
+        )
+    
+    api_key = await get_api_key(provider) or ""
+    base_url = get_provider_base_url(provider)
+    
+    return AsyncOpenAI(
+        base_url=base_url,
+        api_key=api_key,
+    )
+
+
 def get_model() -> str:
     """Get the model name based on provider."""
     return config.settings.chat_model
@@ -73,12 +186,19 @@ def build_messages(
     context: str = "",
     history: list[dict] | None = None,
     custom_system_prompt: str | None = None,
+    include_plugin_capabilities: bool = True,
 ) -> list[dict]:
     """Build the messages array for the chat completion."""
     messages = []
 
     # Use custom system prompt if provided, otherwise use default
-    system_prompt = custom_system_prompt if custom_system_prompt else SYSTEM_PROMPT
+    base_prompt = custom_system_prompt if custom_system_prompt else SYSTEM_PROMPT
+    
+    # Enhance with plugin capabilities if enabled
+    if include_plugin_capabilities:
+        system_prompt = _build_enhanced_system_prompt(base_prompt)
+    else:
+        system_prompt = base_prompt
 
     # System prompt with optional context
     if context:
@@ -112,6 +232,7 @@ async def chat(
     history: list[dict] | None = None,
     enable_research: bool = True,
     custom_system_prompt: str | None = None,
+    enable_plugins: bool = True,
 ) -> str:
     """Send a message to the AI and get a response.
     
@@ -121,16 +242,27 @@ async def chat(
         history: Conversation history
         enable_research: Whether to enable web research tool
         custom_system_prompt: Custom system prompt (for agent personalities)
+        enable_plugins: Whether to enable plugin tools
     """
+    import json
+    
     client = await get_client()
     model = get_model()
-    messages = build_messages(message, context, history, custom_system_prompt)
+    messages = build_messages(message, context, history, custom_system_prompt, include_plugin_capabilities=enable_plugins)
 
-    # Check if we should enable research tools
-    tools = None
+    # Collect all available tools
+    tools = []
+    
+    # Add research tool if enabled
     if enable_research and _should_enable_research(message):
         from .web_research import RESEARCH_TOOL_DEFINITION
-        tools = [RESEARCH_TOOL_DEFINITION]
+        tools.append(RESEARCH_TOOL_DEFINITION)
+    
+    # Add plugin tools if enabled
+    plugin_tools = []
+    if enable_plugins:
+        plugin_tools, _ = _get_active_plugin_tools()
+        tools.extend(plugin_tools)
 
     # First API call
     kwargs: dict = {"model": model, "messages": messages}
@@ -147,8 +279,10 @@ async def chat(
         messages.append(assistant_message.model_dump())
         
         for tool_call in assistant_message.tool_calls:
-            if tool_call.function.name == "research_web":
-                import json
+            tool_name = tool_call.function.name
+            
+            if tool_name == "research_web":
+                # Handle research tool
                 from .web_research import research_topic
                 
                 try:
@@ -161,16 +295,19 @@ async def chat(
                     tool_response = json.dumps({
                         "success": research_result["success"],
                         "sources": research_result["sources"],
-                        "content": research_result["content"][:8000]  # Limit content size
+                        "content": research_result["content"][:8000]
                     })
                 except Exception as e:
                     tool_response = json.dumps({"success": False, "error": str(e)})
-                
-                messages.append({
-                    "role": "tool",
-                    "tool_call_id": tool_call.id,
-                    "content": tool_response
-                })
+            else:
+                # Handle plugin tools
+                tool_response = await _execute_plugin_tool(tool_name, tool_call.function.arguments)
+            
+            messages.append({
+                "role": "tool",
+                "tool_call_id": tool_call.id,
+                "content": tool_response
+            })
         
         # Get final response with tool results
         final_response = await client.chat.completions.create(
@@ -180,6 +317,30 @@ async def chat(
         return final_response.choices[0].message.content or ""
 
     return assistant_message.content or ""
+
+
+async def _execute_plugin_tool(tool_name: str, arguments: str) -> str:
+    """Execute a plugin tool and return the result as JSON string."""
+    import json
+    
+    try:
+        from .plugin_manager import get_plugin_manager
+        from .tool_registry import tool_registry
+        
+        args = json.loads(arguments) if arguments else {}
+        
+        # Find the tool handler in the tool registry
+        handler = tool_registry.get_handler(tool_name)
+        
+        if handler:
+            result = await handler(args)
+            return json.dumps(result)
+        else:
+            return json.dumps({"success": False, "error": f"Tool '{tool_name}' not found"})
+            
+    except Exception as e:
+        logger.error(f"Plugin tool execution error for {tool_name}: {e}")
+        return json.dumps({"success": False, "error": str(e)})
 
 
 def _should_enable_research(message: str) -> bool:

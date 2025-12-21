@@ -2,13 +2,15 @@
  * Inbox page for Smart Inbox feature.
  */
 
+import { useNavigate } from "react-router-dom";
 import { SmartInbox } from "@/components/inbox";
 
 export default function InboxPage() {
+  const navigate = useNavigate();
+  
   const handleViewMemory = (memoryId: number) => {
-    // Navigate to memory or open memory viewer
-    console.log("View memory:", memoryId);
-    // TODO: Integrate with memory navigation
+    // Navigate to memories page with the memory ID as a query param to open detail panel
+    navigate(`/memories?view=${memoryId}`);
   };
 
   return (

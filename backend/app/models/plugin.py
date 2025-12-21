@@ -79,6 +79,9 @@ class PluginManifest(BaseModel):
     # Compatibility
     min_thinkos_version: str = Field(default="1.0.0")
     max_thinkos_version: str | None = None
+    
+    # Default settings (shown in plugin settings UI)
+    default_settings: dict[str, Any] = Field(default_factory=dict)
 
 
 class PluginConfig(BaseModel):

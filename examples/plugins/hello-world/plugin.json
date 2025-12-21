@@ -1,0 +1,22 @@
+{
+  "id": "hello-world",
+  "name": "Hello World",
+  "version": "1.0.0",
+  "description": "A simple example plugin demonstrating the ThinkOS plugin system. Provides a greeting tool and basic memory access.",
+  "type": "tool",
+  "author": {
+    "name": "ThinkOS Team",
+    "email": "hello@thinkos.dev",
+    "url": "https://github.com/ThinkFoundation/ThinkOS-Client"
+  },
+  "main": "main.py",
+  "permissions": [
+    "read_memories"
+  ],
+  "python_dependencies": [],
+  "homepage": "https://github.com/ThinkFoundation/ThinkOS-Client",
+  "repository": "https://github.com/ThinkFoundation/ThinkOS-Client",
+  "license": "Apache-2.0",
+  "keywords": ["example", "hello-world", "demo"],
+  "min_thinkos_version": "0.5.0"
+}

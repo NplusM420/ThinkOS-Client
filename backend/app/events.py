@@ -17,6 +17,10 @@ class EventType(str, Enum):
     CONVERSATION_CREATED = "conversation_created"
     CONVERSATION_UPDATED = "conversation_updated"
     CONVERSATION_DELETED = "conversation_deleted"
+    CLIP_CREATED = "clip_created"
+    CLIP_UPDATED = "clip_updated"
+    CLIP_DELETED = "clip_deleted"
+    NOTIFICATION = "notification"
 
 
 @dataclass
@@ -59,3 +63,17 @@ class EventManager:
 
 # Global event manager instance
 event_manager = EventManager()
+
+
+async def emit_event(event_type: str, data: dict[str, Any]) -> None:
+    """Emit a generic event to all subscribers.
+    
+    This is a convenience function for emitting events from tools and services.
+    """
+    # Create a generic event with the data
+    event = MemoryEvent(
+        type=EventType(event_type) if event_type in EventType.__members__.values() else EventType.NOTIFICATION,
+        memory_id=data.get("id", 0),
+        data=data,
+    )
+    await event_manager.publish(event)

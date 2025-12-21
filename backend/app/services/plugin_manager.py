@@ -177,13 +177,14 @@ class PluginManager:
         
         shutil.copytree(source_path, plugin_dir)
         
-        # Create installation record
+        # Create installation record with default settings from manifest
         now = datetime.utcnow()
+        default_settings = manifest.default_settings.copy() if manifest.default_settings else {}
         installation = PluginInstallation(
             id=manifest.id,
             manifest=manifest,
             status=PluginStatus.ENABLED if enable else PluginStatus.DISABLED,
-            config=PluginConfig(plugin_id=manifest.id),
+            config=PluginConfig(plugin_id=manifest.id, settings=default_settings),
             installed_at=now,
             updated_at=now,
         )
@@ -296,7 +297,9 @@ class PluginManager:
             plugin_path = self._plugins_dir / plugin_id
             loader = PluginLoader(plugin_path, installation.manifest)
             
-            await loader.load()
+            # Pass config settings to the plugin
+            config_settings = installation.config.settings if installation.config else {}
+            await loader.load(config_settings=config_settings)
             
             self._loaded_plugins[plugin_id] = loader
             installation.is_loaded = True

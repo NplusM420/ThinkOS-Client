@@ -171,7 +171,7 @@ class VoiceExecutor:
     async def _handle_run_agent(self, intent: ParsedIntent) -> ExecutionResult:
         """Run an agent."""
         from ..db.crud import get_agents
-        from ..services.agent_executor import AgentExecutor
+        from ..services.enhanced_agent_executor import EnhancedAgentExecutor
         
         agent_name = intent.entities.get("agent_name", "")
         task = intent.entities.get("task", intent.original_text)
@@ -208,19 +208,46 @@ class VoiceExecutor:
                     speak_response=f"I couldn't find an agent called {agent_name}. Available agents are: {available}",
                 )
             
-            # Start agent execution (async, don't wait for completion)
-            executor = AgentExecutor(agent)
-            # Note: In a real implementation, this would be run in background
-            # and results streamed back
+            # Get database session and run agent
+            from ..db.core import get_db
+            from .. import models as db_models
             
-            return ExecutionResult(
-                success=True,
-                intent_type=intent.intent_type,
-                message=f"Started agent '{agent.name}'",
-                data={"agent_id": agent.id, "agent_name": agent.name},
-                speak_response=f"Starting the {agent.name} agent now.",
-                action_taken=f"Started agent '{agent.name}' with task: {task}",
-            )
+            # Get db session from generator
+            db_gen = get_db()
+            db = next(db_gen)
+            
+            try:
+                # Get the actual database agent model
+                db_agent = db.query(db_models.Agent).filter(
+                    db_models.Agent.id == agent.id
+                ).first()
+                
+                if not db_agent:
+                    return ExecutionResult(
+                        success=False,
+                        intent_type=intent.intent_type,
+                        message=f"Agent '{agent_name}' not found in database",
+                        speak_response=f"I couldn't find that agent.",
+                    )
+                
+                # Run agent with enhanced orchestration
+                executor = EnhancedAgentExecutor(db, enable_planning=True)
+                result = await executor.run(db_agent, task)
+                
+                return ExecutionResult(
+                    success=True,
+                    intent_type=intent.intent_type,
+                    message=f"Agent '{agent.name}' completed",
+                    data={
+                        "agent_id": agent.id,
+                        "agent_name": agent.name,
+                        "output": result.output,
+                    },
+                    speak_response=result.output[:500] if result.output else f"The {agent.name} agent has finished.",
+                    action_taken=f"Ran agent '{agent.name}' with task: {task}",
+                )
+            finally:
+                db.close()
         except Exception as e:
             logger.error(f"Failed to run agent: {e}")
             return ExecutionResult(
@@ -271,15 +298,79 @@ class VoiceExecutor:
     # =========================================================================
     
     async def _handle_run_tool(self, intent: ParsedIntent) -> ExecutionResult:
-        """Run a tool directly."""
-        tool_name = intent.entities.get("tool_name", "")
+        """Run a tool directly via voice command."""
+        from ..db.core import get_db
+        from .tool_registry import tool_registry
+        from .tool_executor import ToolExecutor
         
-        return ExecutionResult(
-            success=True,
-            intent_type=intent.intent_type,
-            message="Tool execution via voice not yet implemented",
-            speak_response="Running tools directly by voice isn't available yet. Try running an agent instead.",
-        )
+        tool_name = intent.entities.get("tool_name", "")
+        tool_params = intent.entities.get("params", {})
+        
+        if not tool_name:
+            return ExecutionResult(
+                success=False,
+                intent_type=intent.intent_type,
+                message="No tool name provided",
+                speak_response="Which tool would you like me to run?",
+            )
+        
+        # Find the tool
+        tool = tool_registry.get_tool(tool_name)
+        if not tool:
+            # Try partial match
+            all_tools = tool_registry.list_tools()
+            matching = [t for t in all_tools if tool_name.lower() in t.name.lower()]
+            if matching:
+                tool = matching[0]
+            else:
+                available = ", ".join(t.name for t in all_tools[:5])
+                return ExecutionResult(
+                    success=False,
+                    intent_type=intent.intent_type,
+                    message=f"Tool '{tool_name}' not found",
+                    speak_response=f"I couldn't find a tool called {tool_name}. Available tools include: {available}",
+                )
+        
+        try:
+            # Get db session and execute tool
+            db_gen = get_db()
+            db = next(db_gen)
+            
+            try:
+                executor = ToolExecutor(db)
+                executor.grant_all_permissions()  # Voice commands are trusted
+                
+                result = await executor.execute(tool.id, tool_params)
+                
+                if result.success:
+                    # Format result for speech
+                    output_str = str(result.result)[:500] if result.result else "completed successfully"
+                    return ExecutionResult(
+                        success=True,
+                        intent_type=intent.intent_type,
+                        message=f"Tool '{tool.name}' executed successfully",
+                        data={"tool_id": tool.id, "result": result.result},
+                        speak_response=f"The {tool.name} tool {output_str}",
+                        action_taken=f"Executed tool '{tool.name}'",
+                    )
+                else:
+                    return ExecutionResult(
+                        success=False,
+                        intent_type=intent.intent_type,
+                        message=f"Tool execution failed: {result.error}",
+                        speak_response=f"The {tool.name} tool failed: {result.error}",
+                    )
+            finally:
+                db.close()
+                
+        except Exception as e:
+            logger.error(f"Failed to run tool: {e}")
+            return ExecutionResult(
+                success=False,
+                intent_type=intent.intent_type,
+                message=f"Failed to run tool: {e}",
+                speak_response="Sorry, I couldn't run that tool.",
+            )
     
     # =========================================================================
     # Workflow Handlers

@@ -5,6 +5,7 @@ from .http import register_http_tools
 from .notifications import register_notification_tools
 from .file_system import register_file_system_tools
 from .browser import register_browser_tools
+from .clips import register_clip_tools
 
 
 def register_all_builtin_tools() -> None:
@@ -14,3 +15,4 @@ def register_all_builtin_tools() -> None:
     register_notification_tools()
     register_file_system_tools()
     register_browser_tools()
+    register_clip_tools()
