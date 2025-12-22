@@ -103,8 +103,8 @@ class PluginManager:
                 now = datetime.utcnow()
                 
                 # Create default config from settings
-                default_settings = manifest_data.get("settings", {})
-                config = PluginConfig(settings=default_settings) if default_settings else None
+                default_settings = manifest_data.get("default_settings", {}) or manifest_data.get("settings", {})
+                config = PluginConfig(plugin_id=plugin_id, settings=default_settings)
                 
                 self._plugins[plugin_id] = PluginInstallation(
                     id=plugin_id,
