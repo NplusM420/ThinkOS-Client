@@ -42,10 +42,15 @@ Job = _orm_module.Job
 Agent = _orm_module.Agent
 AgentRun = _orm_module.AgentRun
 AgentRunStep = _orm_module.AgentRunStep
+AgentRunPlan = _orm_module.AgentRunPlan
+AgentRunPlanStep = _orm_module.AgentRunPlanStep
+AgentRunEvaluation = _orm_module.AgentRunEvaluation
 Workflow = _orm_module.Workflow
 WorkflowRun = _orm_module.WorkflowRun
 WorkflowRunStep = _orm_module.WorkflowRunStep
 Secret = _orm_module.Secret
+VideoClip = _orm_module.VideoClip
+VideoClipTag = _orm_module.VideoClipTag
 
 __all__ = [
     # Pydantic API models
@@ -73,8 +78,13 @@ __all__ = [
     "Agent",
     "AgentRun",
     "AgentRunStep",
+    "AgentRunPlan",
+    "AgentRunPlanStep",
+    "AgentRunEvaluation",
     "Workflow",
     "WorkflowRun",
     "WorkflowRunStep",
     "Secret",
+    "VideoClip",
+    "VideoClipTag",
 ]
