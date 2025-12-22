@@ -174,12 +174,12 @@ export function ClipperStatus({ className, onStatusChange }: ClipperStatusProps)
             canGenerate ? "text-primary" : "text-amber-600 dark:text-amber-400"
           )}
         >
-          {balance.toLocaleString()} credits
+          {(balance / 100000).toFixed(2)} CLIP
         </span>
         {!canGenerate && (
           <>
             <span className="text-xs text-muted-foreground">
-              (need {minRequired})
+              (need {(minRequired / 100000).toFixed(2)})
             </span>
             <Button
               variant="ghost"

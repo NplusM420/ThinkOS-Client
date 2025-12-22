@@ -309,7 +309,7 @@ export function PluginSettings({ pluginId, onBack }: PluginSettingsProps) {
                         <div className="flex items-center justify-between">
                           <span className="text-sm text-muted-foreground">Credit Balance</span>
                           <span className={`text-lg font-semibold ${clipperStatus.canGenerate ? 'text-green-500' : 'text-amber-500'}`}>
-                            {clipperStatus.balance.toLocaleString()} CLIP
+                            {(clipperStatus.balance / 100000).toFixed(2)} CLIP
                           </span>
                         </div>
                         {!clipperStatus.canGenerate && (
