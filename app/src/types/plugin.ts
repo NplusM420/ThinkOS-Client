@@ -34,6 +34,7 @@ export interface PluginInfo {
   installed_at: string;
   is_loaded: boolean;
   error_message?: string;
+  icon?: string;
 }
 
 export interface PluginListResponse {

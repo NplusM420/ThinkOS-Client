@@ -118,6 +118,7 @@ class PluginInfo(BaseModel):
     installed_at: datetime
     is_loaded: bool = False
     error_message: str | None = None
+    icon: str | None = None
 
 
 class PluginInstallRequest(BaseModel):

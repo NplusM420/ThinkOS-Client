@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" fill="none">
+  <!-- Outer C shape -->
+  <path d="M50 5C25.1 5 5 25.1 5 50s20.1 45 45 45c12.4 0 23.7-5 31.8-13.2" stroke="currentColor" stroke-width="14" stroke-linecap="round" fill="none"/>
+  <!-- Inner rounded rectangle -->
+  <rect x="30" y="30" width="40" height="40" rx="8" fill="none" stroke="currentColor" stroke-width="4"/>
+  <!-- Play triangle -->
+  <path d="M45 38v24l18-12z" fill="#34D399"/>
+</svg>

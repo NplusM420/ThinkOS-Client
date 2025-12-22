@@ -1,9 +1,11 @@
 """API routes for plugin management."""
 
 import logging
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, UploadFile, File
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from ..models.plugin import (
@@ -71,7 +73,40 @@ async def get_plugin(plugin_id: str):
         installed_at=installation.installed_at,
         is_loaded=installation.is_loaded,
         error_message=installation.error_message,
+        icon=installation.manifest.icon,
     )
+
+
+@router.get("/{plugin_id}/icon")
+async def get_plugin_icon(plugin_id: str):
+    """Get the icon for a plugin."""
+    manager = get_plugin_manager()
+    plugin_path = manager.get_plugin_path(plugin_id)
+    
+    if not plugin_path:
+        raise HTTPException(status_code=404, detail=f"Plugin not found: {plugin_id}")
+    
+    installation = manager.get_plugin(plugin_id)
+    if not installation or not installation.manifest.icon:
+        raise HTTPException(status_code=404, detail="Plugin has no icon")
+    
+    icon_path = plugin_path / installation.manifest.icon
+    if not icon_path.exists():
+        raise HTTPException(status_code=404, detail="Icon file not found")
+    
+    # Determine media type
+    suffix = icon_path.suffix.lower()
+    media_types = {
+        ".svg": "image/svg+xml",
+        ".png": "image/png",
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".ico": "image/x-icon",
+        ".webp": "image/webp",
+    }
+    media_type = media_types.get(suffix, "application/octet-stream")
+    
+    return FileResponse(icon_path, media_type=media_type)
 
 
 @router.post("/install", response_model=PluginInfo)

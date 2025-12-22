@@ -309,8 +309,19 @@ function PluginCard({ plugin, onToggle, onReload, onUninstall, onSettings }: Plu
       }`}
     >
       {/* Icon */}
-      <div className="p-2.5 rounded-lg bg-muted flex-shrink-0">
-        <Icon className="h-5 w-5" />
+      <div className="p-2.5 rounded-lg bg-muted flex-shrink-0 overflow-hidden">
+        {plugin.icon ? (
+          <img
+            src={`/api/plugins/${plugin.id}/icon`}
+            alt={plugin.name}
+            className="h-5 w-5 object-contain"
+            onError={(e) => {
+              e.currentTarget.style.display = 'none';
+              e.currentTarget.nextElementSibling?.classList.remove('hidden');
+            }}
+          />
+        ) : null}
+        <Icon className={`h-5 w-5 ${plugin.icon ? 'hidden' : ''}`} />
       </div>
 
       {/* Main content */}
