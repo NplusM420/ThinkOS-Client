@@ -41,6 +41,13 @@ def get_plugins_dir() -> Path:
     return plugins_dir
 
 
+def get_bundled_plugins_dir() -> Path:
+    """Get the bundled plugins directory (shipped with the app)."""
+    # In development, this is backend/app/plugins
+    # In production, this would be in the app bundle
+    return Path(__file__).parent.parent / "plugins"
+
+
 class PluginManager:
     """Manages plugin installation, configuration, and lifecycle."""
     
@@ -50,6 +57,71 @@ class PluginManager:
         self._plugins_dir = get_plugins_dir()
         self._registry_path = self._plugins_dir / "registry.json"
         self._load_registry()
+    
+    def install_bundled_plugins(self) -> None:
+        """Auto-install bundled plugins that ship with the app."""
+        bundled_dir = get_bundled_plugins_dir()
+        if not bundled_dir.exists():
+            logger.debug(f"No bundled plugins directory found at {bundled_dir}")
+            return
+        
+        for plugin_dir in bundled_dir.iterdir():
+            if not plugin_dir.is_dir():
+                continue
+            
+            manifest_path = plugin_dir / "plugin.json"
+            if not manifest_path.exists():
+                continue
+            
+            try:
+                with open(manifest_path, "r") as f:
+                    manifest_data = json.load(f)
+                
+                plugin_id = manifest_data.get("id")
+                if not plugin_id:
+                    logger.warning(f"Bundled plugin at {plugin_dir} has no id in manifest")
+                    continue
+                
+                # Check if already installed
+                if plugin_id in self._plugins:
+                    # Check if bundled version is newer
+                    bundled_version = manifest_data.get("version", "0.0.0")
+                    installed_version = self._plugins[plugin_id].manifest.version
+                    if bundled_version <= installed_version:
+                        logger.debug(f"Bundled plugin {plugin_id} already installed (v{installed_version})")
+                        continue
+                    logger.info(f"Updating bundled plugin {plugin_id} from v{installed_version} to v{bundled_version}")
+                
+                # Copy plugin to user plugins directory
+                dest_dir = self._plugins_dir / plugin_id
+                if dest_dir.exists():
+                    shutil.rmtree(dest_dir)
+                shutil.copytree(plugin_dir, dest_dir)
+                
+                # Parse manifest and register
+                manifest = PluginManifest(**manifest_data)
+                now = datetime.utcnow()
+                
+                # Create default config from settings
+                default_settings = manifest_data.get("settings", {})
+                config = PluginConfig(settings=default_settings) if default_settings else None
+                
+                self._plugins[plugin_id] = PluginInstallation(
+                    id=plugin_id,
+                    manifest=manifest,
+                    status=PluginStatus.ENABLED,  # Auto-enable bundled plugins
+                    config=config,
+                    installed_at=now,
+                    updated_at=now,
+                    is_loaded=False,
+                )
+                
+                logger.info(f"Installed bundled plugin: {manifest.name} v{manifest.version}")
+                
+            except Exception as e:
+                logger.error(f"Failed to install bundled plugin from {plugin_dir}: {e}")
+        
+        self._save_registry()
     
     def _load_registry(self) -> None:
         """Load plugin registry from disk."""

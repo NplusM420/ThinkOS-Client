@@ -3,6 +3,7 @@
  */
 
 import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import {
   CheckCircle2,
@@ -42,6 +43,7 @@ interface ClipperStatusProps {
 }
 
 export function ClipperStatus({ className, onStatusChange }: ClipperStatusProps) {
+  const navigate = useNavigate();
   const [status, setStatus] = useState<ClipperHealth | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -104,7 +106,7 @@ export function ClipperStatus({ className, onStatusChange }: ClipperStatusProps)
             variant="ghost"
             size="sm"
             className="h-6 px-2 text-xs"
-            onClick={() => window.location.href = "/settings?tab=plugins&plugin=clippy-integration"}
+            onClick={() => navigate("/settings?tab=plugins&plugin=clippy-integration")}
           >
             Configure
             <ExternalLink className="h-3 w-3 ml-1" />

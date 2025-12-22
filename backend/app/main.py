@@ -49,6 +49,8 @@ async def lifespan(app: FastAPI):
     from .services.plugin_manager import get_plugin_manager
     plugin_manager = get_plugin_manager()
     try:
+        # Auto-install bundled plugins (e.g., clippy-integration)
+        plugin_manager.install_bundled_plugins()
         await plugin_manager.load_enabled_plugins()
         logger.info("Plugin system initialized")
     except Exception as e:
