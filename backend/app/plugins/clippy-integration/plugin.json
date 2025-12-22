@@ -5,9 +5,9 @@
   "description": "Integrates with the Clipper platform to create video clips using the Clippy AI agent. Send video URLs and prompts to get back clips with captions and preferred aspect ratios. Supports credit balance tracking, job polling, and automatic clip saving.",
   "type": "integration",
   "author": {
-    "name": "AI Layer Labs",
-    "email": "dev@ailayerlabs.com",
-    "url": "https://ailayerlabs.com"
+    "name": "NplusM",
+    "email": "",
+    "url": "https://github.com/NplusM420"
   },
   "main": "main.py",
   "permissions": [

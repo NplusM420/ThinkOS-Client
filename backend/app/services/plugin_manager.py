@@ -109,7 +109,7 @@ class PluginManager:
                 self._plugins[plugin_id] = PluginInstallation(
                     id=plugin_id,
                     manifest=manifest,
-                    status=PluginStatus.ENABLED,  # Auto-enable bundled plugins
+                    status=PluginStatus.DISABLED,  # Bundled plugins start disabled
                     config=config,
                     installed_at=now,
                     updated_at=now,

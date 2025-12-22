@@ -223,7 +223,7 @@ export function PluginBrowser({ onSelectPlugin }: PluginBrowserProps) {
           </p>
         </div>
       ) : (
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+        <div className="space-y-3">
           {filteredPlugins.map((plugin) => (
             <PluginCard
               key={plugin.id}
@@ -303,96 +303,79 @@ function PluginCard({ plugin, onToggle, onReload, onUninstall, onSettings }: Plu
   const hasError = plugin.status === 'error';
 
   return (
-    <Card className={hasError ? 'border-destructive' : ''}>
-      <CardHeader className="pb-3">
-        <div className="flex items-start justify-between">
-          <div className="flex items-center gap-3">
-            <div className="p-2 rounded-lg bg-muted">
-              <Icon className="h-5 w-5" />
-            </div>
-            <div>
-              <CardTitle className="text-base">{plugin.name}</CardTitle>
-              <CardDescription className="text-xs">
-                v{plugin.version} by {plugin.author.name}
-              </CardDescription>
-            </div>
-          </div>
-          <Badge variant={getStatusVariant(plugin.status)}>
+    <div
+      className={`flex items-center gap-4 p-4 rounded-lg border bg-card hover:bg-muted/50 transition-colors ${
+        hasError ? 'border-destructive' : 'border-border'
+      }`}
+    >
+      {/* Icon */}
+      <div className="p-2.5 rounded-lg bg-muted flex-shrink-0">
+        <Icon className="h-5 w-5" />
+      </div>
+
+      {/* Main content */}
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2">
+          <h3 className="font-medium truncate">{plugin.name}</h3>
+          <Badge variant={getStatusVariant(plugin.status)} className="text-xs">
             {plugin.status}
           </Badge>
         </div>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        <p className="text-sm text-muted-foreground line-clamp-2">
+        <p className="text-xs text-muted-foreground mt-0.5">
+          v{plugin.version} by {plugin.author.name}
+        </p>
+        <p className="text-sm text-muted-foreground mt-1 line-clamp-1">
           {plugin.description}
         </p>
-
-        {/* Permissions */}
-        {plugin.permissions.length > 0 && (
-          <div className="flex flex-wrap gap-1">
-            {plugin.permissions.slice(0, 3).map((perm) => (
-              <PermissionBadge key={perm} permission={perm} />
-            ))}
-            {plugin.permissions.length > 3 && (
-              <Badge variant="outline" className="text-xs">
-                +{plugin.permissions.length - 3} more
-              </Badge>
-            )}
-          </div>
-        )}
-
-        {/* Error message */}
         {hasError && plugin.error_message && (
-          <div className="flex items-start gap-2 p-2 rounded bg-destructive/10 text-destructive text-xs">
-            <AlertCircle className="h-4 w-4 flex-shrink-0 mt-0.5" />
-            <span className="line-clamp-2">{plugin.error_message}</span>
-          </div>
+          <p className="text-xs text-destructive mt-1 line-clamp-1">
+            {plugin.error_message}
+          </p>
         )}
+      </div>
 
-        {/* Actions */}
-        <div className="flex items-center justify-between pt-2 border-t">
-          <div className="flex gap-1">
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={onToggle}
-              title={isEnabled ? 'Disable' : 'Enable'}
-            >
-              {isEnabled ? (
-                <PowerOff className="h-4 w-4" />
-              ) : (
-                <Power className="h-4 w-4" />
-              )}
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={onReload}
-              title="Reload"
-              disabled={!isEnabled}
-            >
-              <RefreshCw className="h-4 w-4" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={onUninstall}
-              title="Uninstall"
-              className="text-destructive hover:text-destructive"
-            >
-              <Trash2 className="h-4 w-4" />
-            </Button>
-          </div>
-          {onSettings && (
-            <Button variant="ghost" size="sm" onClick={onSettings}>
-              <Settings className="h-4 w-4 mr-1" />
-              Settings
-              <ChevronRight className="h-4 w-4 ml-1" />
-            </Button>
+      {/* Actions */}
+      <div className="flex items-center gap-1 flex-shrink-0">
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={onToggle}
+          title={isEnabled ? 'Disable' : 'Enable'}
+          className="h-8 w-8"
+        >
+          {isEnabled ? (
+            <PowerOff className="h-4 w-4" />
+          ) : (
+            <Power className="h-4 w-4" />
           )}
-        </div>
-      </CardContent>
-    </Card>
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={onReload}
+          title="Reload"
+          disabled={!isEnabled}
+          className="h-8 w-8"
+        >
+          <RefreshCw className="h-4 w-4" />
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={onUninstall}
+          title="Uninstall"
+          className="h-8 w-8 text-destructive hover:text-destructive"
+        >
+          <Trash2 className="h-4 w-4" />
+        </Button>
+        {onSettings && (
+          <Button variant="outline" size="sm" onClick={onSettings} className="ml-2">
+            <Settings className="h-4 w-4 mr-1.5" />
+            Configure
+          </Button>
+        )}
+      </div>
+    </div>
   );
 }
 
