@@ -1,4 +1,5 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
+import { useSearchParams } from "react-router-dom";
 import { createPortal } from "react-dom";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -11,7 +12,8 @@ import { ModelSelector } from "@/components/ModelSelector";
 import { ProviderSettings } from "@/components/ProviderSettings";
 import { BrowserUseSettings } from "@/components/BrowserUseSettings";
 import { VoiceSettingsPanel } from "@/components/voice";
-import { PluginBrowser } from "@/components/plugins";
+import { PluginBrowser, PluginSettings } from "@/components/plugins";
+import type { PluginInfo } from "@/types/plugin";
 import { useReembedJob } from "@/hooks/useReembedJob";
 
 interface Settings {
@@ -35,6 +37,10 @@ interface SettingsPageProps {
 }
 
 export default function SettingsPage({ onNameChange }: SettingsPageProps) {
+  const [searchParams] = useSearchParams();
+  const pluginsSectionRef = useRef<HTMLDivElement>(null);
+  const [selectedPlugin, setSelectedPlugin] = useState<PluginInfo | null>(null);
+  
   const [settings, setSettings] = useState<Settings>({
     ai_provider: "ollama",
     openai_api_key: "",
@@ -99,6 +105,24 @@ export default function SettingsPage({ onNameChange }: SettingsPageProps) {
     fetchProfile();
     fetchStaleEmbeddingsCount();
   }, []);
+
+  // Handle tab query parameter to scroll to specific section
+  useEffect(() => {
+    const tab = searchParams.get("tab");
+    const pluginId = searchParams.get("plugin");
+    
+    if (tab === "plugins" && pluginsSectionRef.current) {
+      // Small delay to ensure DOM is ready
+      setTimeout(() => {
+        pluginsSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      }, 100);
+      
+      // If a specific plugin is requested, auto-select it
+      if (pluginId) {
+        setSelectedPlugin({ id: pluginId } as PluginInfo);
+      }
+    }
+  }, [searchParams]);
 
   const fetchEmbeddingModel = async (provider: string) => {
     try {
@@ -438,12 +462,19 @@ export default function SettingsPage({ onNameChange }: SettingsPageProps) {
         </Card>
 
         {/* Plugins Section */}
-        <Card className="mb-6">
+        <Card className="mb-6" ref={pluginsSectionRef} id="plugins-section">
           <CardHeader>
             <CardTitle className="text-base">Plugins</CardTitle>
           </CardHeader>
           <CardContent>
-            <PluginBrowser />
+            {selectedPlugin ? (
+              <PluginSettings
+                pluginId={selectedPlugin.id}
+                onBack={() => setSelectedPlugin(null)}
+              />
+            ) : (
+              <PluginBrowser onSelectPlugin={setSelectedPlugin} />
+            )}
           </CardContent>
         </Card>
 

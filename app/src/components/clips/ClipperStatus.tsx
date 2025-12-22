@@ -104,7 +104,7 @@ export function ClipperStatus({ className, onStatusChange }: ClipperStatusProps)
             variant="ghost"
             size="sm"
             className="h-6 px-2 text-xs"
-            onClick={() => window.location.href = "/settings?tab=plugins"}
+            onClick={() => window.location.href = "/settings?tab=plugins&plugin=clippy-integration"}
           >
             Configure
             <ExternalLink className="h-3 w-3 ml-1" />
